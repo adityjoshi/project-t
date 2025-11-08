@@ -95,11 +95,11 @@ Content is automatically categorized into:
 **What it does**:
 - Analyzes title, content, and type
 - Categorizes into predefined sections
-- Uses Google Gemini AI for intelligent classification
+- Uses Claude AI (via LiteLLM proxy) for intelligent classification
 - Falls back to type-based defaults if AI fails
 
 **How it works**:
-1. Sends content to Gemini AI
+1. Sends content to Claude AI
 2. AI analyzes semantic meaning
 3. Returns appropriate category
 4. Category displayed as purple badge in UI
@@ -114,8 +114,8 @@ Content is automatically categorized into:
 - Creates searchable metadata
 
 **How it works**:
-1. Analyzes content with AI
-2. Extracts important keywords and concepts
+1. Analyzes content with Claude AI
+2. Claude extracts important keywords and concepts
 3. Generates 3-5 relevant tags
 4. Stores as searchable array in database
 
@@ -124,7 +124,7 @@ Content is automatically categorized into:
 **Service**: `AIService.GenerateSemanticSummary()` / `AIService.SummarizeYouTubeVideo()`
 
 **What it does**:
-- Generates concise summaries (2-3 sentences)
+- Generates concise summaries (2-3 sentences) using Claude AI
 - Optimized for search with key concepts
 - Video-specific summarization for YouTube content
 - Asynchronous processing (non-blocking)
@@ -147,12 +147,12 @@ Content is automatically categorized into:
 
 **What it does**:
 - Creates vector embeddings for semantic search
-- Uses Google Gemini text-embedding-004 model
+- Uses gemini-embedding-001 model (via Claude/LiteLLM proxy) or Gemini text-embedding-004
 - Stores in ChromaDB for similarity search
 
 **How it works**:
-1. Content sent to embedding API
-2. Returns 768-dimensional vector
+1. Content sent to embedding API (via LiteLLM proxy when using Claude)
+2. Returns vector embeddings
 3. Stored in ChromaDB with item ID
 4. Used for semantic similarity search
 
@@ -162,7 +162,7 @@ Content is automatically categorized into:
 
 **What it does**:
 - Extracts text from images and screenshots
-- Uses Gemini Vision API
+- Uses Gemini Vision API (optional fallback)
 - Makes image content searchable
 - Asynchronous processing
 
@@ -488,29 +488,42 @@ Content is automatically categorized into:
 - "Videos from Karpathy last week" (type + author + date)
 - "Black shoes under $300 from Amazon" (content + price + type)
 
-### 2. Hybrid Search System
+### 2. Hybrid Search System (AI-Optimized)
 
 **Service**: `SearchService.Search()`
 
 **Components**:
 
+#### Query Enhancement (Claude AI)
+- **Plain English Understanding**: Converts natural language queries into searchable terms
+- **Query Expansion**: Adds synonyms and related terms automatically
+- **Example**: "things about AI" → "artificial intelligence machine learning neural networks AI"
+- **Intent Understanding**: Understands what users really want to find
+
 #### Semantic Search
-- Uses AI embeddings (Gemini text-embedding-004)
+- Uses AI embeddings (gemini-embedding-001 via Claude/LiteLLM, or Gemini text-embedding-004)
 - Stored in ChromaDB
 - Finds items by meaning, not just keywords
 - Vector similarity search
+- Uses enhanced queries from Claude for better semantic matching
 
-#### Text Search
-- PostgreSQL ILIKE queries
+#### Text Search (Enhanced)
+- PostgreSQL ILIKE queries with multi-term matching
 - Searches titles, content, summaries, OCR text
-- Keyword matching
+- **Enhanced**: Matches individual terms from Claude-expanded queries
+- Finds content even when exact phrase doesn't match
 - Fallback when ChromaDB unavailable
+
+#### Result Re-ranking (Claude AI)
+- Claude re-ranks search results by relevance to original query
+- Considers user intent and context
+- Improves result ordering for better user experience
 
 #### Result Combination
 - Merges semantic and text results
 - Boosts items found in both
 - Removes duplicates
-- Ranks by relevance score
+- Ranks by relevance score (enhanced by Claude)
 
 ### 3. Related Items Discovery
 
@@ -708,7 +721,8 @@ item_relations (
 - Summarization
 - Tag generation
 - Categorization
-- Gemini API integration
+- Claude API integration (via LiteLLM proxy) - Primary
+- Gemini API integration (optional fallback)
 
 **SearchService** (`internal/services/search_service.go`):
 - Hybrid search (semantic + text)
@@ -725,7 +739,7 @@ item_relations (
 
 **OCRService** (`internal/services/ocr_service.go`):
 - Text extraction from images
-- Gemini Vision API integration
+- Gemini Vision API integration (optional fallback)
 - Asynchronous processing
 
 **RelationService** (`internal/services/relation_service.go`):
@@ -849,7 +863,11 @@ item_relations (
 - **Framework**: Gin (HTTP web framework)
 - **Database**: PostgreSQL 15
 - **Vector DB**: ChromaDB
-- **AI Provider**: Google Gemini (free tier)
+- **AI Provider**: Claude (via LiteLLM proxy) - Primary
+  - Models: claude-sonnet-4-5-20250929, claude-opus-4-1-20250805, claude-haiku-4-5-20251001
+  - Embeddings: gemini-embedding-001 (via LiteLLM)
+  - Used for: Summarization, categorization, tagging, search query enhancement, result re-ranking
+- **AI Provider**: Google Gemini (optional fallback)
   - Models: gemini-2.5-flash, gemini-2.5-pro
   - Embeddings: text-embedding-004
   - Vision: gemini-pro-vision (OCR)

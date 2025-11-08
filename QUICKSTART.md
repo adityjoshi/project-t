@@ -1,24 +1,18 @@
 # 🚀 Quick Start Guide
 
-## Get Your OpenAI API Key
+## Get Your Claude API Key
 
-1. **Go to OpenAI Platform**: https://platform.openai.com/api-keys
-2. **Sign up/Login** to your account
-3. **Add Payment Method** (required - you pay per API usage):
-   - Go to: https://platform.openai.com/account/billing
-   - Click "Add payment method"
-   - Add your credit card
-4. **Create API Key**:
-   - Go back to: https://platform.openai.com/api-keys
-   - Click "Create new secret key"
-   - Name it (e.g., "Synapse")
-   - **Copy the key immediately** (starts with `sk-`)
-   - Save it somewhere safe
+1. **Get your Claude API key** from your provider
+2. **The system uses LiteLLM proxy** at: `https://litellm-339960399182.us-central1.run.app`
+3. **Copy your API key** and save it somewhere safe
 
-**Note**: OpenAI charges based on usage:
-- Embeddings: ~$0.0001 per 1K tokens (very cheap)
-- GPT-4: ~$0.01-0.03 per 1K tokens (more expensive)
-- Typical usage: $1-5/month for personal use
+**Note**: The system uses Claude via LiteLLM proxy for:
+- AI summarization
+- Automatic categorization and tagging
+- Search query enhancement and result re-ranking
+- Vector embeddings (via gemini-embedding-001)
+
+**Optional**: You can also set `GEMINI_API_KEY` for fallback support and OCR features.
 
 ## Run the Project
 
@@ -26,7 +20,9 @@
 
 ```bash
 # 1. Create .env file with your API key
-echo "OPENAI_API_KEY=sk-your-actual-key-here" > .env
+echo "ANTHROPIC_AUTH_TOKEN=your-claude-api-key-here" > .env
+echo "ANTHROPIC_BASE_URL=https://litellm-339960399182.us-central1.run.app" >> .env
+echo "AI_PROVIDER=claude" >> .env
 
 # 2. Run the script
 ./run.sh
@@ -36,7 +32,9 @@ echo "OPENAI_API_KEY=sk-your-actual-key-here" > .env
 
 ```bash
 # 1. Create .env file
-echo "OPENAI_API_KEY=sk-your-actual-key-here" > .env
+echo "ANTHROPIC_AUTH_TOKEN=your-claude-api-key-here" > .env
+echo "ANTHROPIC_BASE_URL=https://litellm-339960399182.us-central1.run.app" >> .env
+echo "AI_PROVIDER=claude" >> .env
 
 # 2. Start all services
 docker-compose up -d
@@ -107,7 +105,7 @@ cat .env
 docker-compose logs backend
 
 # Verify API key is set
-docker-compose exec backend env | grep OPENAI
+docker-compose exec backend env | grep ANTHROPIC
 ```
 
 ### Port already in use?

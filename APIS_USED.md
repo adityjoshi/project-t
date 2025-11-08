@@ -2,31 +2,55 @@
 
 This document lists all external APIs and services integrated into Project Synapse.
 
-## Total: **7 External APIs**
+## Total: **8 External APIs**
 
 ---
 
-## 1. **Google Gemini API** (Primary AI Provider)
+## 1. **Claude API** (Primary AI Provider - via LiteLLM Proxy)
+
+**Base URL**: `https://litellm-339960399182.us-central1.run.app`
+
+**Endpoints Used**:
+- **Chat Completions**: `/v1/chat/completions`
+  - Models: `claude-sonnet-4-5-20250929`, `claude-opus-4-1-20250805`, `claude-haiku-4-5-20251001`
+  - Used for: Summarization, categorization, tag generation, query enhancement, result re-ranking
+- **Embeddings**: `/v1/embeddings`
+  - Model: `gemini-embedding-001`
+  - Used for: Vector embeddings for semantic search
+
+**Purpose**: 
+- AI-powered summarization (primary)
+- Automatic categorization
+- Tag generation
+- **Search query enhancement** - converts plain English to searchable terms
+- **Search result re-ranking** - improves relevance of search results
+- Vector embeddings (via gemini-embedding-001)
+
+**Authentication**: API Key (ANTHROPIC_AUTH_TOKEN)
+
+**Note**: Uses LiteLLM proxy for unified API access
+
+---
+
+## 2. **Google Gemini API** (Fallback/Optional AI Provider)
 
 **Base URL**: `https://generativelanguage.googleapis.com/`
 
 **Endpoints Used**:
 - **Text Generation**: `/v1beta/models/{model}:generateContent`
   - Models: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`
-  - Used for: Summarization, categorization, tag generation
+  - Used for: Summarization, categorization, tag generation (fallback)
 - **Embeddings**: `/v1beta/models/text-embedding-004:embedContent`
-  - Used for: Vector embeddings for semantic search
+  - Used for: Vector embeddings for semantic search (alternative)
 - **Vision API**: `/v1beta/models/gemini-pro-vision:generateContent`
   - Used for: OCR (text extraction from images)
 
 **API Versions**: v1, v1beta
 
 **Purpose**: 
-- AI-powered summarization
-- Automatic categorization
-- Tag generation
-- Vector embeddings
+- Fallback for AI features when Claude unavailable
 - OCR from images
+- Alternative embedding generation
 
 **Authentication**: API Key (GEMINI_API_KEY)
 
@@ -34,9 +58,11 @@ This document lists all external APIs and services integrated into Project Synap
 - Free tier: 60 requests/minute, 1,500 requests/day
 - Paid tier: Higher limits available
 
+**Note**: Optional - only used if `AI_PROVIDER=gemini` or as fallback
+
 ---
 
-## 2. **OpenAI API** (Fallback AI Provider)
+## 3. **OpenAI API** (Fallback AI Provider)
 
 **Base URL**: `https://api.openai.com/v1/`
 
@@ -58,7 +84,7 @@ This document lists all external APIs and services integrated into Project Synap
 
 ---
 
-## 3. **YouTube API** (Embed & Thumbnails)
+## 4. **YouTube API** (Embed & Thumbnails)
 
 **Base URLs**:
 - Embed: `https://www.youtube.com/embed/{videoId}`
@@ -77,7 +103,7 @@ This document lists all external APIs and services integrated into Project Synap
 
 ---
 
-## 4. **Open Library API** (Book Covers)
+## 5. **Open Library API** (Book Covers)
 
 **Base URLs**:
 - Cover by ISBN: `https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg`
@@ -99,7 +125,7 @@ This document lists all external APIs and services integrated into Project Synap
 
 ---
 
-## 5. **Unsplash Source API** (Images)
+## 6. **Unsplash Source API** (Images)
 
 **Base URL**: `https://source.unsplash.com/{width}x{height}/?{keywords}`
 
@@ -119,7 +145,7 @@ This document lists all external APIs and services integrated into Project Synap
 
 ---
 
-## 6. **Open Graph Protocol** (Web Page Metadata)
+## 7. **Open Graph Protocol** (Web Page Metadata)
 
 **Base URL**: Any public URL
 
@@ -139,7 +165,7 @@ This document lists all external APIs and services integrated into Project Synap
 
 ---
 
-## 7. **ChromaDB API** (Vector Database)
+## 8. **ChromaDB API** (Vector Database)
 
 **Base URL**: `http://chromadb:8000/api/v1/` (internal Docker network)
 
@@ -166,23 +192,26 @@ This document lists all external APIs and services integrated into Project Synap
 
 | # | API/Service | Purpose | Authentication | Required |
 |---|-------------|---------|----------------|----------|
-| 1 | Google Gemini | AI (summarization, categorization, embeddings, OCR) | API Key | ✅ Yes |
-| 2 | OpenAI | AI fallback (summarization, embeddings) | API Key | ❌ Optional |
-| 3 | YouTube | Video embeds & thumbnails | None | ✅ Yes |
-| 4 | Open Library | Book covers | None | ✅ Yes |
-| 5 | Unsplash Source | Recipe & category images | None | ✅ Yes |
-| 6 | Open Graph | Web page metadata | None | ✅ Yes |
-| 7 | ChromaDB | Vector storage & search | None | ✅ Yes |
+| 1 | Claude (LiteLLM) | AI (summarization, categorization, search optimization, embeddings) | API Key | ✅ Yes |
+| 2 | Google Gemini | AI fallback (summarization, embeddings, OCR) | API Key | ❌ Optional |
+| 3 | OpenAI | AI fallback (summarization, embeddings) | API Key | ❌ Optional |
+| 4 | YouTube | Video embeds & thumbnails | None | ✅ Yes |
+| 5 | Open Library | Book covers | None | ✅ Yes |
+| 6 | Unsplash Source | Recipe & category images | None | ✅ Yes |
+| 7 | Open Graph | Web page metadata | None | ✅ Yes |
+| 8 | ChromaDB | Vector storage & search | None | ✅ Yes |
 
 ---
 
 ## API Key Requirements
 
 **Required**:
-- `GEMINI_API_KEY` - For AI features
+- `ANTHROPIC_AUTH_TOKEN` - For Claude AI features (summarization, search optimization)
+- `ANTHROPIC_BASE_URL` - LiteLLM proxy URL (default: https://litellm-339960399182.us-central1.run.app)
 
 **Optional**:
-- `OPENAI_API_KEY` - For fallback when Gemini quota exceeded
+- `GEMINI_API_KEY` - For fallback AI features and OCR
+- `OPENAI_API_KEY` - For additional fallback support
 
 **No API Keys Needed**:
 - YouTube (public endpoints)
@@ -195,15 +224,19 @@ This document lists all external APIs and services integrated into Project Synap
 
 ## Rate Limits & Quotas
 
-1. **Gemini API**: 
+1. **Claude API (via LiteLLM)**: 
+   - Depends on your API provider/plan
+   - Check with your provider for specific limits
+
+2. **Gemini API**: 
    - Free: 60 req/min, 1,500 req/day
    - Paid: Higher limits
 
-2. **OpenAI API**: 
+3. **OpenAI API**: 
    - Varies by plan
    - Pay-per-use pricing
 
-3. **Other APIs**: 
+4. **Other APIs**: 
    - No rate limits (or very high limits)
    - Public/free services
 
@@ -211,10 +244,12 @@ This document lists all external APIs and services integrated into Project Synap
 
 ## Error Handling
 
+- **Claude API Failures**: Automatically falls back to Gemini or OpenAI if configured
 - **Gemini Quota Exceeded**: Automatically falls back to OpenAI if configured
 - **API Failures**: Graceful degradation - core functionality remains unaffected
 - **Missing Images**: Falls back through multiple image sources
 - **ChromaDB Unavailable**: Falls back to PostgreSQL text search only
+- **Search Optimization**: If Claude query enhancement fails, uses original query
 
 ---
 

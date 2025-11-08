@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"synapse/internal/models"
 
 	"github.com/google/uuid"
@@ -206,16 +207,43 @@ func (r *ItemRepository) SearchItems(ctx context.Context, filters *models.QueryF
 	argIndex := 1
 
 	// Text search (includes OCR text for images/screenshots)
+	// Enhanced to handle multiple terms from Claude query expansion
 	if filters.SearchTerms != "" {
-		query += fmt.Sprintf(` AND (
-			title ILIKE $%d OR 
-			content ILIKE $%d OR 
-			summary ILIKE $%d OR
-			ocr_text ILIKE $%d
-		)`, argIndex, argIndex, argIndex, argIndex)
-		searchPattern := "%" + filters.SearchTerms + "%"
-		args = append(args, searchPattern)
-		argIndex++
+		// Split enhanced query into individual terms for better matching
+		terms := strings.Fields(filters.SearchTerms)
+		
+		// Build OR conditions for each term - matches if ANY term is found
+		// This allows finding content even when exact phrase doesn't match
+		var conditions []string
+		for _, term := range terms {
+			if len(term) < 2 { // Skip very short terms
+				continue
+			}
+			termPattern := "%" + term + "%"
+			conditions = append(conditions, fmt.Sprintf(`(
+				title ILIKE $%d OR 
+				content ILIKE $%d OR 
+				summary ILIKE $%d OR
+				ocr_text ILIKE $%d
+			)`, argIndex, argIndex, argIndex, argIndex))
+			args = append(args, termPattern)
+			argIndex++
+		}
+		
+		if len(conditions) > 0 {
+			// Also try exact phrase match for better relevance
+			exactPattern := "%" + filters.SearchTerms + "%"
+			conditions = append(conditions, fmt.Sprintf(`(
+				title ILIKE $%d OR 
+				content ILIKE $%d OR 
+				summary ILIKE $%d OR
+				ocr_text ILIKE $%d
+			)`, argIndex, argIndex, argIndex, argIndex))
+			args = append(args, exactPattern)
+			argIndex++
+			
+			query += " AND (" + strings.Join(conditions, " OR ") + ")"
+		}
 	}
 
 	// Type filter (only apply if search terms exist, or if type was explicitly set)

@@ -27,13 +27,27 @@ func NewSearchService(aiService *AIService, itemRepo *repository.ItemRepository)
 }
 
 // Search performs hybrid search: semantic (ChromaDB) + text (PostgreSQL) with natural language parsing
-// Enhanced to find specific passages and quotes
+// Enhanced with Claude AI for query understanding and result re-ranking
 func (s *SearchService) Search(ctx context.Context, query string, limit int) ([]models.SearchResult, error) {
 	// Parse natural language query
 	filters := ParseNaturalLanguageQuery(query)
 
+	// Use Claude to enhance the search query - this converts plain English to searchable terms
+	// This is critical for finding content even when exact words don't match
+	enhancedQuery, err := s.aiService.EnhanceSearchQuery(ctx, query)
+	if err != nil {
+		// If Claude enhancement fails, use original query
+		enhancedQuery = query
+	}
+
 	// For quote/passage searches, enhance the query with context
-	enhancedQuery := s.enhanceQueryForPassageSearch(ctx, filters.SearchTerms, query)
+	enhancedQuery = s.enhanceQueryForPassageSearch(ctx, filters.SearchTerms, enhancedQuery)
+	
+	// Also enhance the search terms for text search to improve keyword matching
+	if enhancedQuery != query {
+		// Use enhanced query for better text search too
+		filters.SearchTerms = enhancedQuery
+	}
 
 	// Try semantic search first (if ChromaDB is available)
 	semanticResults, semanticErr := s.semanticSearch(ctx, enhancedQuery, limit*2)
@@ -47,7 +61,7 @@ func (s *SearchService) Search(ctx context.Context, query string, limit int) ([]
 	}
 
 	// Combine results
-	results := s.combineResults(semanticResults, textResults, limit)
+	results := s.combineResults(semanticResults, textResults, limit*2) // Get more results for re-ranking
 
 	// For quote searches, boost items that contain the exact phrase
 	results = s.boostExactMatches(results, filters.SearchTerms)
@@ -55,17 +69,38 @@ func (s *SearchService) Search(ctx context.Context, query string, limit int) ([]
 	// Apply post-filters (price, etc. that aren't in SQL)
 	results = s.applyPostFilters(results, filters)
 
+	// Use Claude to re-rank results by relevance (if we have results)
+	if len(results) > 1 {
+		reRanked, err := s.aiService.ReRankSearchResults(ctx, query, results, limit)
+		if err == nil && len(reRanked) > 0 {
+			results = reRanked
+		}
+	}
+
+	// Limit to requested number
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
 	return results, nil
 }
 
 // enhanceQueryForPassageSearch enhances queries to better find specific passages
+// Uses Claude to understand context and improve query for passage/quote searches
 func (s *SearchService) enhanceQueryForPassageSearch(ctx context.Context, searchTerms, originalQuery string) string {
 	// If the query mentions "quote", "said", "wrote", etc., keep the original context
 	lowerQuery := strings.ToLower(originalQuery)
 	if strings.Contains(lowerQuery, "quote") || 
 	   strings.Contains(lowerQuery, "said") || 
 	   strings.Contains(lowerQuery, "wrote") ||
-	   strings.Contains(lowerQuery, "mentioned") {
+	   strings.Contains(lowerQuery, "mentioned") ||
+	   strings.Contains(lowerQuery, "passage") ||
+	   strings.Contains(lowerQuery, "excerpt") {
+		// For passage searches, use Claude to enhance the query
+		enhanced, err := s.aiService.EnhanceSearchQuery(ctx, originalQuery)
+		if err == nil && enhanced != "" {
+			return enhanced
+		}
 		// Keep more context for passage searches
 		return originalQuery
 	}

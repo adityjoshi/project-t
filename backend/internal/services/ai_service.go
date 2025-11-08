@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
+	"synapse/internal/models"
 )
 
 type AIService struct {
@@ -248,6 +250,127 @@ func (s *AIService) GenerateTags(ctx context.Context, content string) ([]string,
 	}
 	
 	return cleanedTags, nil
+}
+
+// EnhanceSearchQuery uses Claude to understand and enhance search queries
+// Converts plain English into searchable terms with synonyms and related concepts
+func (s *AIService) EnhanceSearchQuery(ctx context.Context, query string) (string, error) {
+	prompt := fmt.Sprintf(`You are a search query enhancement assistant. Your goal is to help users find content even when they use plain English that doesn't match exact words in the content.
+
+Analyze the following search query and return an improved search query that will find relevant content using semantic understanding.
+
+Examples:
+- "things about AI" → "artificial intelligence machine learning neural networks AI"
+- "cooking ideas" → "recipes cooking food preparation ingredients"
+- "workout tips" → "exercise fitness training health workout"
+- "money saving" → "budget savings finance frugal economical"
+
+Your task:
+1. Understand the user's intent and what they're really looking for
+2. Expand with relevant synonyms, related terms, and alternative phrasings
+3. Include both formal and informal terms
+4. Keep the original meaning but add searchable keywords
+5. Return ONLY the enhanced query with expanded terms, nothing else
+
+Original query: "%s"
+
+Enhanced query:`, query)
+	
+	if s.provider == "claude" && s.claudeKey != "" {
+		enhanced, err := s.callClaude(ctx, prompt, 150)
+		if err == nil && enhanced != "" {
+			return enhanced, nil
+		}
+	}
+	// Fallback: return original query if Claude not available
+	return query, nil
+}
+
+// ReRankSearchResults uses Claude to re-rank search results by relevance
+func (s *AIService) ReRankSearchResults(ctx context.Context, query string, results []models.SearchResult, topK int) ([]models.SearchResult, error) {
+	if len(results) == 0 {
+		return results, nil
+	}
+	
+	// Build context for Claude
+	var itemsContext strings.Builder
+	itemsContext.WriteString(fmt.Sprintf("Search query: %s\n\n", query))
+	itemsContext.WriteString("Search results to rank:\n")
+	
+	for i, result := range results {
+		if i >= 10 { // Limit to top 10 for Claude context
+			break
+		}
+		itemsContext.WriteString(fmt.Sprintf("%d. Title: %s\n   Summary: %s\n   Type: %s\n\n", 
+			i+1, result.Item.Title, result.Item.Summary, result.Item.Type))
+	}
+	
+	prompt := fmt.Sprintf(`You are a search result ranking assistant. Given a search query and a list of search results, rank them by relevance to the query.
+
+%s
+
+Return ONLY a comma-separated list of numbers (1, 2, 3, etc.) representing the order of relevance, with the most relevant first. For example: "3,1,5,2,4"
+
+Ranked order:`, itemsContext.String())
+	
+	if s.provider == "claude" && s.claudeKey != "" {
+		rankedOrder, err := s.callClaude(ctx, prompt, 50)
+		if err != nil {
+			// If Claude fails, return original order
+			return results, nil
+		}
+		
+		// Parse the ranked order
+		indices := parseRankedIndices(rankedOrder, len(results))
+		if len(indices) > 0 {
+			// Reorder results based on Claude's ranking
+			reordered := make([]models.SearchResult, 0, len(indices))
+			for _, idx := range indices {
+				if idx >= 0 && idx < len(results) {
+					reordered = append(reordered, results[idx])
+				}
+			}
+			// Add any remaining results that weren't ranked
+			rankedSet := make(map[int]bool)
+			for _, idx := range indices {
+				rankedSet[idx] = true
+			}
+			for i, result := range results {
+				if !rankedSet[i] {
+					reordered = append(reordered, result)
+				}
+			}
+			return reordered, nil
+		}
+	}
+	
+	return results, nil
+}
+
+// parseRankedIndices parses Claude's ranked order response
+func parseRankedIndices(rankedOrder string, maxLen int) []int {
+	// Clean the response
+	rankedOrder = strings.TrimSpace(rankedOrder)
+	rankedOrder = strings.Trim(rankedOrder, "\"")
+	rankedOrder = strings.Trim(rankedOrder, "'")
+	
+	// Extract numbers
+	re := regexp.MustCompile(`\d+`)
+	matches := re.FindAllString(rankedOrder, -1)
+	
+	var indices []int
+	for _, match := range matches {
+		idx := 0
+		if _, err := fmt.Sscanf(match, "%d", &idx); err == nil {
+			// Convert from 1-based to 0-based index
+			idx--
+			if idx >= 0 && idx < maxLen {
+				indices = append(indices, idx)
+			}
+		}
+	}
+	
+	return indices
 }
 
 // CategorizeContent uses AI to automatically categorize content into sections

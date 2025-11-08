@@ -2,6 +2,14 @@
 
 A private, intelligent knowledge management system that captures, understands, and retrieves your thoughts using AI.
 
+## 🎥 Demo Video
+
+Watch Project Synapse in action:
+
+[![Project Synapse Demo](https://img.youtube.com/vi/kO7T8ihSSrM/maxresdefault.jpg)](https://youtu.be/kO7T8ihSSrM)
+
+[Watch on YouTube](https://youtu.be/kO7T8ihSSrM)
+
 ## Features
 
 - 🧠 **Capture Any Thought**: Save text, URLs, and images instantly
@@ -17,7 +25,8 @@ A private, intelligent knowledge management system that captures, understands, a
 - **Go 1.21+** with Gin framework
 - **PostgreSQL** for metadata storage
 - **ChromaDB** for vector embeddings
-- **OpenAI API** for embeddings, summarization, and tagging
+- **Claude API** (via LiteLLM proxy) for AI features: summarization, categorization, tagging, and search optimization
+- **Gemini API** (optional fallback) for embeddings and OCR
 
 ### Frontend
 - **React** with Vite
@@ -34,24 +43,28 @@ A private, intelligent knowledge management system that captures, understands, a
 2. **Node.js 18+** - [Install Node.js](https://nodejs.org/)
 3. **PostgreSQL** - [Install PostgreSQL](https://www.postgresql.org/download/)
 4. **ChromaDB** - Install via pip: `pip install chromadb`
-5. **OpenAI API Key** - Get from [OpenAI](https://platform.openai.com/api-keys)
+5. **Claude API Key** - Get from your provider (used via LiteLLM proxy)
 
 ## Quick Start (Docker - Recommended)
 
 The easiest way to run Project Synapse is using Docker Compose:
 
-### 1. Get OpenAI API Key
+### 1. Get Claude API Key
 
-1. Go to [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-2. Sign up/login and create a new API key
-3. Copy your key (starts with `sk-`)
+1. Get your Claude API key from your provider
+2. The system uses LiteLLM proxy at: `https://litellm-339960399182.us-central1.run.app`
+3. Copy your API key
 
-### 2. Set Environment Variable
+### 2. Set Environment Variables
 
 ```bash
 # Create .env file in project root
-echo "OPENAI_API_KEY=sk-your-key-here" > .env
+echo "ANTHROPIC_AUTH_TOKEN=your-claude-api-key-here" > .env
+echo "ANTHROPIC_BASE_URL=https://litellm-339960399182.us-central1.run.app" >> .env
+echo "AI_PROVIDER=claude" >> .env
 ```
+
+**Optional**: You can also set `GEMINI_API_KEY` for fallback support.
 
 ### 3. Run with Docker
 
@@ -109,10 +122,12 @@ go mod download
 # Create .env file (copy from .env.example)
 cp ../.env.example .env
 
-# Edit .env and add your OpenAI API key
+# Edit .env and add your Claude API key
 # DATABASE_URL=postgres://postgres:postgres@localhost:5432/synapse?sslmode=disable
 # CHROMA_URL=http://localhost:8000
-# OPENAI_API_KEY=your_key_here
+# ANTHROPIC_AUTH_TOKEN=your_claude_api_key_here
+# ANTHROPIC_BASE_URL=https://litellm-339960399182.us-central1.run.app
+# AI_PROVIDER=claude
 
 # Run the server
 go run cmd/server/main.go
@@ -210,25 +225,36 @@ project-synapse/
 
 ### Environment Variables
 
-Create a `.env` file in the `backend` directory:
+Create a `.env` file in the project root:
 
 ```env
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/synapse?sslmode=disable
 CHROMA_URL=http://localhost:8000
-OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_AUTH_TOKEN=your_claude_api_key_here
+ANTHROPIC_BASE_URL=https://litellm-339960399182.us-central1.run.app
+AI_PROVIDER=claude
 PORT=8080
+
+# Optional fallback
+GEMINI_API_KEY=your_gemini_key_here
+OPENAI_API_KEY=your_openai_key_here
 ```
 
 ## Features in Detail
 
 ### Auto-Summarization
-When you save an item, the system automatically generates a 2-3 sentence summary using GPT-4.
+When you save an item, the system automatically generates a 2-3 sentence summary using Claude AI. For YouTube videos, it creates focused summaries from video descriptions.
 
 ### Auto-Tagging
-The system extracts 3-5 relevant tags from your content automatically.
+The system extracts 3-5 relevant tags from your content automatically using Claude AI.
 
-### Semantic Search
-Search works by understanding the meaning of your query, not just matching keywords. Powered by OpenAI embeddings and vector similarity.
+### Intelligent Search
+Search is powered by Claude AI for query understanding and optimization:
+- **Plain English Queries**: Search using natural language - "things about AI" finds content about artificial intelligence, machine learning, etc.
+- **Query Enhancement**: Claude expands your queries with synonyms and related terms
+- **Semantic Search**: Uses embeddings to find content by meaning, not just keywords
+- **Result Re-ranking**: Claude re-ranks results by relevance to your query
+- **Hybrid Search**: Combines semantic search (embeddings) with text search for best results
 
 ### Related Items
 The system discovers connections between your saved items by finding similar content using vector embeddings.
@@ -244,21 +270,15 @@ The system discovers connections between your saved items by finding similar con
 - Check `DATABASE_URL` in `.env` is correct
 - Ensure the database `synapse` exists
 
-### OpenAI API Errors
-- Verify your API key is correct in `.env`
-- Check you have API credits available
-- Ensure you're using a valid OpenAI API key
+### AI API Errors
+- Verify your `ANTHROPIC_AUTH_TOKEN` is correct in `.env`
+- Check that `ANTHROPIC_BASE_URL` is set correctly
+- Ensure `AI_PROVIDER=claude` is set
+- If using Gemini fallback, verify `GEMINI_API_KEY` is set
 
 ### Extension Not Working
 - Make sure the backend is running on `http://localhost:8080`
 - Check browser console for errors
 - Verify extension permissions in `chrome://extensions/`
 
-## License
-
-MIT
-
-## Contributing
-
-This is a personal project, but feel free to fork and modify for your own use!
 
