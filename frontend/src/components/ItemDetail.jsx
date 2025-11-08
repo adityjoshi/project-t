@@ -86,6 +86,12 @@ export default function ItemDetail({ onDelete }) {
     item.source_url.includes('youtu.be')
   );
 
+  // Check if it's a PDF
+  const isPDF = item.source_url && (
+    item.source_url.toLowerCase().endsWith('.pdf') ||
+    item.source_url.toLowerCase().includes('.pdf?')
+  );
+
   // Check if it's a todo list
   const isTodo = item.type === 'text' && (
     item.title?.toLowerCase().includes('todo') || 
@@ -198,7 +204,7 @@ export default function ItemDetail({ onDelete }) {
           </button>
         </div>
 
-        {item.source_url && (
+        {item.source_url && !isPDF && (
           <div className="mb-6">
             <a
               href={item.source_url}
@@ -211,8 +217,23 @@ export default function ItemDetail({ onDelete }) {
           </div>
         )}
 
+        {/* Show embedded PDF viewer */}
+        {isPDF && (
+          <div className="mb-6 rounded-lg overflow-hidden shadow-lg border border-gray-200">
+            <div className="relative" style={{ paddingBottom: '75%', height: 0, overflow: 'hidden', minHeight: '600px' }}>
+              <iframe
+                src={item.source_url}
+                className="absolute top-0 left-0 w-full h-full"
+                style={{ border: 'none' }}
+                title={item.title}
+                type="application/pdf"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Show embedded video player for YouTube videos */}
-        {(item.embed_html || isYouTubeVideo) && (
+        {(item.embed_html || isYouTubeVideo) && !isPDF && (
           <div className="mb-6">
             {item.embed_html ? (
               <div className="rounded-lg overflow-hidden shadow-lg">
@@ -249,7 +270,7 @@ export default function ItemDetail({ onDelete }) {
           </div>
         )}
 
-        {item.image_url && !item.embed_html && !isYouTubeVideo && (
+        {item.image_url && !item.embed_html && !isYouTubeVideo && !isPDF && (
           <div className="mb-6">
             <img
               src={item.image_url}
@@ -285,8 +306,8 @@ export default function ItemDetail({ onDelete }) {
           </div>
         )}
 
-        {/* Reader Mode Toggle for Articles (not for videos) */}
-        {(item.type === 'blog' || item.type === 'url' || item.type === 'article') && item.type !== 'video' && !isYouTubeVideo && (
+        {/* Reader Mode Toggle for Articles (not for videos or PDFs) */}
+        {(item.type === 'blog' || item.type === 'url' || item.type === 'article') && item.type !== 'video' && !isYouTubeVideo && !isPDF && (
           <div className="mb-4 flex justify-end">
             <button
               onClick={() => setReaderMode(!readerMode)}
@@ -297,7 +318,7 @@ export default function ItemDetail({ onDelete }) {
           </div>
         )}
 
-        {readerMode && (item.type === 'blog' || item.type === 'url' || item.type === 'article') && item.type !== 'video' && !isYouTubeVideo ? (
+        {readerMode && (item.type === 'blog' || item.type === 'url' || item.type === 'article') && item.type !== 'video' && !isYouTubeVideo && !isPDF ? (
           <ReaderMode content={item.content} title={item.title} />
         ) : (
           <div className="mb-6">

@@ -140,8 +140,14 @@ func (s *ItemService) CreateItem(ctx context.Context, req *models.CreateItemRequ
 		}
 		
 		// If URL type (not video), get embed and preview
+		// This will also handle PDFs via GetURLMetadata
 		if req.Type == "url" && req.SourceURL != "" && embedHTML == "" {
 			embedHTML, imageURL, err = s.metadataService.GetURLMetadata(ctx, req.SourceURL)
+		}
+		
+		// Check if URL is a PDF and generate embed if needed (fallback if GetURLMetadata didn't catch it)
+		if embedHTML == "" && req.SourceURL != "" && (strings.HasSuffix(strings.ToLower(req.SourceURL), ".pdf") || strings.Contains(strings.ToLower(req.SourceURL), ".pdf?")) {
+			embedHTML = fmt.Sprintf(`<iframe width="100%%" height="100%%" src="%s" frameborder="0" style="position: absolute; top: 0; left: 0; width: 100%%; height: 100%%;" type="application/pdf"></iframe>`, req.SourceURL)
 		}
 		
 		// Check if URL is a YouTube video even if type is not "video"

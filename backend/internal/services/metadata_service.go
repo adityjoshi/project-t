@@ -33,6 +33,14 @@ func (s *MetadataService) GetURLMetadata(ctx context.Context, url string) (embed
 		}
 	}
 
+	// For PDF URLs, generate PDF embed
+	if strings.HasSuffix(strings.ToLower(url), ".pdf") || strings.Contains(strings.ToLower(url), ".pdf?") {
+		// Generate responsive PDF embed using iframe
+		embedHTML = fmt.Sprintf(`<iframe width="100%%" height="100%%" src="%s" frameborder="0" style="position: absolute; top: 0; left: 0; width: 100%%; height: 100%%;" type="application/pdf"></iframe>`, url)
+		// PDFs don't have preview images, but we can use a generic PDF icon if needed
+		return embedHTML, "", nil
+	}
+
 	// For other URLs, try to get Open Graph image
 	imageURL, _ = s.getOpenGraphImage(ctx, url)
 	
