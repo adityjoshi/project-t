@@ -8,7 +8,6 @@ Watch Project Synapse in action:
 
 [![Project Synapse Demo](https://img.youtube.com/vi/kO7T8ihSSrM/maxresdefault.jpg)](https://youtu.be/kO7T8ihSSrM)
 
-[Watch on YouTube](https://youtu.be/kO7T8ihSSrM)
 
 ## Features
 
