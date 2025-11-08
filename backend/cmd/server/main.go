@@ -37,7 +37,19 @@ func main() {
 
 	// Check AI provider
 	aiProvider := os.Getenv("AI_PROVIDER")
-	if aiProvider == "" || aiProvider == "gemini" {
+	if aiProvider == "" {
+		aiProvider = "claude" // Default to Claude
+	}
+	
+	if aiProvider == "claude" {
+		claudeKey := os.Getenv("ANTHROPIC_AUTH_TOKEN")
+		if claudeKey == "" {
+			log.Println("Warning: ANTHROPIC_AUTH_TOKEN not set. AI features will not work.")
+			log.Println("Set ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL in your .env file")
+		} else {
+			log.Println("Using Claude (via LiteLLM proxy) for AI features")
+		}
+	} else if aiProvider == "gemini" {
 		geminiKey := os.Getenv("GEMINI_API_KEY")
 		if geminiKey == "" {
 			log.Println("Warning: GEMINI_API_KEY not set. AI features will not work.")

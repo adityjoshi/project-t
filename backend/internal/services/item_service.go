@@ -392,9 +392,14 @@ func (s *ItemService) generateAndUpdateVideoSummaryAsync(ctx context.Context, it
 	// Generate video summary using Gemini
 	summary, err := s.aiService.SummarizeYouTubeVideo(ctx, videoURL, title, description)
 	if err != nil {
-		fmt.Printf("Warning: Failed to generate video summary for item %s: %v\n", itemID, err)
-		// Fallback to regular summary
-		s.generateAndUpdateSummaryAsync(ctx, itemID, title, description)
+		// Check if it's a quota/rate limit error
+		if strings.Contains(err.Error(), "quota") || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "rate limit") {
+			fmt.Printf("Warning: Gemini API quota exceeded for item %s. Summary generation skipped. Error: %v\n", itemID, err)
+		} else {
+			fmt.Printf("Warning: Failed to generate video summary for item %s: %v\n", itemID, err)
+			// Fallback to regular summary only if it's not a quota issue
+			s.generateAndUpdateSummaryAsync(ctx, itemID, title, description)
+		}
 		return
 	}
 

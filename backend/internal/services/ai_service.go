@@ -12,34 +12,89 @@ import (
 )
 
 type AIService struct {
-	provider   string
-	geminiKey  string
-	openaiKey  string
-	client     *http.Client
+	provider      string
+	geminiKey     string
+	openaiKey     string
+	claudeKey     string
+	claudeBaseURL string
+	client        *http.Client
 }
 
 func NewAIService() *AIService {
 	provider := os.Getenv("AI_PROVIDER")
 	if provider == "" {
-		provider = "gemini" // Default to Gemini (free)
+		provider = "claude" // Default to Claude
 	}
 
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	openaiKey := os.Getenv("OPENAI_API_KEY")
+	claudeKey := os.Getenv("ANTHROPIC_AUTH_TOKEN")
+	claudeBaseURL := os.Getenv("ANTHROPIC_BASE_URL")
+	if claudeBaseURL == "" {
+		claudeBaseURL = "https://litellm-339960399182.us-central1.run.app"
+	}
 
 	return &AIService{
-		provider:  provider,
-		geminiKey: geminiKey,
-		openaiKey: openaiKey,
-		client:    &http.Client{},
+		provider:      provider,
+		geminiKey:     geminiKey,
+		openaiKey:     openaiKey,
+		claudeKey:     claudeKey,
+		claudeBaseURL: claudeBaseURL,
+		client:        &http.Client{},
 	}
 }
 
 func (s *AIService) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	// Use Claude/LiteLLM proxy for embeddings with gemini-embedding-001
+	if s.provider == "claude" && s.claudeKey != "" {
+		return s.generateEmbeddingClaude(ctx, text)
+	}
 	if s.provider == "gemini" {
 		return s.generateEmbeddingGemini(ctx, text)
 	}
 	return s.generateEmbeddingOpenAI(ctx, text)
+}
+
+// generateEmbeddingClaude uses LiteLLM proxy with gemini-embedding-001 model
+func (s *AIService) generateEmbeddingClaude(ctx context.Context, text string) ([]float32, error) {
+	url := fmt.Sprintf("%s/v1/embeddings", s.claudeBaseURL)
+	
+	payload := map[string]interface{}{
+		"input": text,
+		"model": "gemini-embedding-001",
+	}
+	
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.claudeKey)
+	
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate embedding: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("Claude/LiteLLM API error: %s", string(body))
+	}
+	
+	var result struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("no embedding data returned")
+	}
+	
+	return result.Data[0].Embedding, nil
 }
 
 func (s *AIService) generateEmbeddingGemini(ctx context.Context, text string) ([]float32, error) {
@@ -144,8 +199,11 @@ func (s *AIService) SummarizeContent(ctx context.Context, content string) (strin
 		content,
 	)
 	
+	if s.provider == "claude" && s.claudeKey != "" {
+		return s.callClaude(ctx, prompt, 150)
+	}
 	if s.provider == "gemini" {
-		return s.callGemini(ctx, prompt, 150)
+		return s.callGeminiPro(ctx, prompt, 150)
 	}
 	return s.callChatGPT(ctx, prompt, 150)
 }
@@ -165,7 +223,9 @@ func (s *AIService) GenerateTags(ctx context.Context, content string) ([]string,
 	var response string
 	var err error
 	
-	if s.provider == "gemini" {
+	if s.provider == "claude" && s.claudeKey != "" {
+		response, err = s.callClaude(ctx, prompt, 50)
+	} else if s.provider == "gemini" {
 		response, err = s.callGemini(ctx, prompt, 50)
 	} else {
 		response, err = s.callChatGPT(ctx, prompt, 50)
@@ -224,7 +284,9 @@ Return ONLY the category name, nothing else.`,
 	var response string
 	var err error
 	
-	if s.provider == "gemini" {
+	if s.provider == "claude" && s.claudeKey != "" {
+		response, err = s.callClaude(ctx, prompt, 20)
+	} else if s.provider == "gemini" {
 		response, err = s.callGemini(ctx, prompt, 20)
 	} else {
 		response, err = s.callChatGPT(ctx, prompt, 20)
@@ -244,6 +306,7 @@ Return ONLY the category name, nothing else.`,
 }
 
 // GenerateSemanticSummary creates a concise semantic summary optimized for search
+// Uses Claude via LiteLLM proxy, falls back to Gemini/OpenAI if needed
 func (s *AIService) GenerateSemanticSummary(ctx context.Context, title, content string) (string, error) {
 	// Truncate content if too long
 	truncated := content
@@ -261,13 +324,28 @@ func (s *AIService) GenerateSemanticSummary(ctx context.Context, title, content 
 		title, truncated,
 	)
 	
+	// Use Claude if available
+	if s.provider == "claude" && s.claudeKey != "" {
+		return s.callClaude(ctx, prompt, 200)
+	}
+	
+	// Try Gemini first (if provider is gemini)
 	if s.provider == "gemini" {
-		return s.callGemini(ctx, prompt, 200)
+		summary, err := s.callGeminiPro(ctx, prompt, 200)
+		// If Gemini fails due to quota/rate limit and OpenAI is available, fallback to OpenAI
+		if err != nil && s.openaiKey != "" {
+			if strings.Contains(err.Error(), "quota") || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "503") {
+				fmt.Printf("Gemini quota exceeded, falling back to OpenAI for summary generation\n")
+				return s.callChatGPT(ctx, prompt, 200)
+			}
+		}
+		return summary, err
 	}
 	return s.callChatGPT(ctx, prompt, 200)
 }
 
-// SummarizeYouTubeVideo generates a short summary for a YouTube video using Gemini
+// SummarizeYouTubeVideo generates a short summary for a YouTube video
+// Uses Claude via LiteLLM proxy, falls back to Gemini/OpenAI if needed
 func (s *AIService) SummarizeYouTubeVideo(ctx context.Context, videoURL, title, description string) (string, error) {
 	// Truncate description if too long (keep it reasonable for the API)
 	truncatedDesc := description
@@ -285,10 +363,43 @@ Provide a brief summary:`,
 		title, truncatedDesc,
 	)
 	
+	// Use Claude if available
+	if s.provider == "claude" && s.claudeKey != "" {
+		return s.callClaude(ctx, prompt, 150)
+	}
+	
+	// Try Gemini first (if provider is gemini)
 	if s.provider == "gemini" {
-		return s.callGemini(ctx, prompt, 150) // Reduced tokens for shorter summary
+		summary, err := s.callGeminiPro(ctx, prompt, 150)
+		// If Gemini fails due to quota/rate limit and OpenAI is available, fallback to OpenAI
+		if err != nil && s.openaiKey != "" {
+			if strings.Contains(err.Error(), "quota") || strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "503") {
+				fmt.Printf("Gemini quota exceeded, falling back to OpenAI for summary generation\n")
+				return s.callChatGPT(ctx, prompt, 150)
+			}
+		}
+		return summary, err
 	}
 	return s.callChatGPT(ctx, prompt, 150)
+}
+
+// callGeminiPro specifically uses Gemini 2.5 Pro for better quality summaries
+func (s *AIService) callGeminiPro(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	// Prioritize Gemini 2.5 Pro for summaries, with fallbacks
+	// Try v1 API first, then v1beta, with multiple model options
+	models := []struct {
+		apiVersion string
+		modelName  string
+	}{
+		{"v1", "gemini-2.5-flash"},              // Try v1 API with Flash
+		{"v1", "gemini-2.5-pro"},                // Try v1 API with Pro
+		{"v1beta", "gemini-2.5-flash"},          // Try v1beta Flash
+		{"v1beta", "gemini-2.5-pro"},            // Try v1beta Pro
+		{"v1beta", "gemini-2.5-flash-preview-05-20"},
+		{"v1beta", "gemini-2.5-pro-preview-06-05"},
+	}
+	
+	return s.callGeminiWithModels(ctx, prompt, maxTokens, models)
 }
 
 func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int) (string, error) {
@@ -305,6 +416,14 @@ func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int
 		{"v1beta", "gemini-1.5-flash-latest"},
 		{"v1beta", "gemini-1.5-pro-latest"},
 	}
+	
+	return s.callGeminiWithModels(ctx, prompt, maxTokens, models)
+}
+
+func (s *AIService) callGeminiWithModels(ctx context.Context, prompt string, maxTokens int, models []struct {
+	apiVersion string
+	modelName  string
+}) (string, error) {
 	
 	payload := map[string]interface{}{
 		"contents": []map[string]interface{}{
@@ -336,6 +455,9 @@ func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int
 			continue
 		}
 		
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		
 		if resp.StatusCode == http.StatusOK {
 			var result struct {
 				Candidates []struct {
@@ -345,17 +467,31 @@ func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int
 						} `json:"parts"`
 					} `json:"content"`
 				} `json:"candidates"`
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+					Status  string `json:"status"`
+				} `json:"error"`
 			}
 			
-			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				resp.Body.Close()
+			if err := json.Unmarshal(body, &result); err != nil {
 				lastErr = fmt.Errorf("failed to decode response: %w", err)
 				continue
 			}
-			resp.Body.Close()
+			
+			// Check for API errors in response
+			if result.Error != nil {
+				lastErr = fmt.Errorf("Gemini API error (model: %s, code: %d): %s", model.modelName, result.Error.Code, result.Error.Message)
+				// If it's a temporary error (503, 429), continue to next model
+				if result.Error.Code == 503 || result.Error.Code == 429 {
+					continue
+				}
+				// For other errors, also continue to try next model
+				continue
+			}
 			
 			if len(result.Candidates) == 0 {
-				lastErr = fmt.Errorf("no candidates in response")
+				lastErr = fmt.Errorf("no candidates in response from model %s", model.modelName)
 				continue
 			}
 			
@@ -376,12 +512,104 @@ func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int
 			continue
 		}
 		
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		lastErr = fmt.Errorf("Gemini API error (model: %s): %s", model.modelName, string(body))
+		// Handle non-200 status codes
+		var apiError struct {
+			Error struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+				Status  string `json:"status"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &apiError); err == nil && apiError.Error.Message != "" {
+			lastErr = fmt.Errorf("Gemini API error (model: %s, code: %d): %s", model.modelName, apiError.Error.Code, apiError.Error.Message)
+			// For temporary errors, continue to next model
+			if apiError.Error.Code == 503 || apiError.Error.Code == 429 {
+				continue
+			}
+		} else {
+			lastErr = fmt.Errorf("Gemini API error (model: %s, status: %d): %s", model.modelName, resp.StatusCode, string(body))
+		}
 	}
 	
 	return "", fmt.Errorf("all Gemini models failed, last error: %w", lastErr)
+}
+
+// callClaude uses Claude API via LiteLLM proxy for text generation
+func (s *AIService) callClaude(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	url := fmt.Sprintf("%s/v1/chat/completions", s.claudeBaseURL)
+	
+	// Try different Claude model names available via LiteLLM proxy
+	models := []string{
+		"claude-sonnet-4-5-20250929",  // Claude Sonnet 4.5 (best quality)
+		"claude-opus-4-1-20250805",    // Claude Opus 4.1
+		"claude-haiku-4-5-20251001",   // Claude Haiku 4.5 (fastest)
+	}
+	
+	var lastErr error
+	for _, model := range models {
+		payload := map[string]interface{}{
+			"model": model,
+			"messages": []map[string]interface{}{
+				{
+					"role":    "user",
+					"content": prompt,
+				},
+			},
+			"max_tokens": maxTokens,
+			"temperature": 0.7,
+		}
+		
+		jsonData, _ := json.Marshal(payload)
+		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+s.claudeKey)
+		
+		resp, err := s.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to call Claude API: %w", err)
+			continue
+		}
+		defer resp.Body.Close()
+		
+		if resp.StatusCode == http.StatusOK {
+			var result struct {
+				Choices []struct {
+					Message struct {
+						Content string `json:"content"`
+					} `json:"message"`
+				} `json:"choices"`
+			}
+			
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				lastErr = fmt.Errorf("failed to decode response: %w", err)
+				continue
+			}
+			
+			if len(result.Choices) == 0 {
+				lastErr = fmt.Errorf("no response from Claude")
+				continue
+			}
+			
+			return strings.TrimSpace(result.Choices[0].Message.Content), nil
+		}
+		
+		body, _ := io.ReadAll(resp.Body)
+		var apiError struct {
+			Error struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+				Code    string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &apiError); err == nil && apiError.Error.Message != "" {
+			lastErr = fmt.Errorf("Claude API error (model: %s): %s (code: %s)", model, apiError.Error.Message, apiError.Error.Code)
+			// Continue to next model if this one fails
+			continue
+		}
+		lastErr = fmt.Errorf("Claude API error (model: %s): %s", model, string(body))
+	}
+	
+	return "", fmt.Errorf("all Claude models failed, last error: %w", lastErr)
 }
 
 func (s *AIService) callChatGPT(ctx context.Context, prompt string, maxTokens int) (string, error) {

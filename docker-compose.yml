@@ -40,8 +40,11 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/synapse?sslmode=disable
       CHROMA_URL: http://chromadb:8000
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      AI_PROVIDER: gemini
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://litellm-339960399182.us-central1.run.app}
+      AI_PROVIDER: ${AI_PROVIDER:-claude}
       PORT: 8080
     ports:
       - "8080:8080"
