@@ -13,7 +13,6 @@ export default function ItemDetail({ onDelete }) {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
-  const [refreshingSummary, setRefreshingSummary] = useState(false);
   const [readerMode, setReaderMode] = useState(false);
 
   useEffect(() => {
@@ -50,22 +49,6 @@ export default function ItemDetail({ onDelete }) {
     }
   };
 
-  const handleRefreshSummary = async () => {
-    setRefreshingSummary(true);
-    try {
-      await itemsAPI.refreshSummary(id);
-      alert('Summary regeneration started. Please refresh the page in a few seconds to see the updated summary.');
-      // Refresh the item after a delay
-      setTimeout(() => {
-        fetchItem();
-      }, 3000);
-    } catch (error) {
-      console.error('Failed to refresh summary:', error);
-      alert('Failed to refresh summary');
-    } finally {
-      setRefreshingSummary(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -206,24 +189,13 @@ export default function ItemDetail({ onDelete }) {
                   <span className="capitalize">• {item.type}</span>
                 </div>
           </div>
-          <div className="flex gap-2">
-            {(item.type === 'video' || isYouTubeVideo) && (
-              <button
-                onClick={handleRefreshSummary}
-                disabled={refreshingSummary}
-                className="px-4 py-2 text-indigo-600 border border-indigo-300 rounded-lg hover:bg-indigo-50 disabled:opacity-50"
-              >
-                {refreshingSummary ? 'Regenerating...' : '🔄 Regenerate Summary'}
-              </button>
-            )}
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50"
-            >
-              {deleting ? 'Deleting...' : 'Delete'}
-            </button>
-          </div>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50"
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </button>
         </div>
 
         {item.source_url && (

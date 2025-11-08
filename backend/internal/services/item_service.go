@@ -243,12 +243,25 @@ func (s *ItemService) CreateItem(ctx context.Context, req *models.CreateItemRequ
 			}()
 		}
 
-		// Create item with initial summary (will be replaced by async semantic summary)
+		// For videos, use the full description as summary (no truncation)
 		initialSummary := ""
-		if len(content) > 200 {
-			initialSummary = content[:200] + "..."
+		if req.Type == "video" && req.Metadata != nil && req.Metadata["description"] != "" {
+			// Use full description for videos
+			initialSummary = req.Metadata["description"]
+		} else if req.Type == "video" && content != "" {
+			// Extract description from content if it contains "Description:" marker
+			if descIdx := strings.Index(content, "Description:"); descIdx != -1 {
+				initialSummary = strings.TrimSpace(content[descIdx+len("Description:"):])
+			} else {
+				initialSummary = content
+			}
 		} else {
-			initialSummary = content
+			// For non-videos, use truncated content
+			if len(content) > 200 {
+				initialSummary = content[:200] + "..."
+			} else {
+				initialSummary = content
+			}
 		}
 
 		item := &models.Item{
@@ -272,34 +285,8 @@ func (s *ItemService) CreateItem(ctx context.Context, req *models.CreateItemRequ
 			return nil, fmt.Errorf("failed to save item: %w", err)
 		}
 
-		// Asynchronously generate semantic summary and update the item
-		// For videos, use video-specific summarization
-		if req.Type == "video" && req.SourceURL != "" {
-			// Extract description from metadata if available, otherwise use content
-			description := ""
-			if req.Metadata != nil && req.Metadata["description"] != "" {
-				description = req.Metadata["description"]
-				fmt.Printf("Using description from metadata for video %s (length: %d)\n", itemID, len(description))
-			} else if content != "" {
-				// Try to extract description from content if it contains "Description:" marker
-				if descIdx := strings.Index(content, "Description:"); descIdx != -1 {
-					description = strings.TrimSpace(content[descIdx+len("Description:"):])
-					fmt.Printf("Extracted description from content for video %s (length: %d)\n", itemID, len(description))
-				} else {
-					description = content
-					fmt.Printf("Using full content as description for video %s (length: %d)\n", itemID, len(description))
-				}
-			}
-			
-			if description != "" {
-				go s.generateAndUpdateVideoSummaryAsync(context.Background(), itemID, req.SourceURL, req.Title, description)
-			} else {
-				fmt.Printf("Warning: No description available for video %s, using regular summary\n", itemID)
-				go s.generateAndUpdateSummaryAsync(context.Background(), itemID, req.Title, content)
-			}
-		} else {
-			go s.generateAndUpdateSummaryAsync(context.Background(), itemID, req.Title, content)
-		}
+		// Don't generate AI summaries - just use the description as-is for videos
+		// For videos, the summary is already set to the full description above
 
 	return item, nil
 }

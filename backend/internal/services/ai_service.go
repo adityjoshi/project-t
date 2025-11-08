@@ -293,8 +293,19 @@ Based on the title and description above, provide a clear summary of what this v
 }
 
 func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int) (string, error) {
-	// Use gemini-1.5-flash model (faster and more available than gemini-pro)
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%s", s.geminiKey)
+	// Try multiple model names and API versions as fallback
+	// Updated to use Gemini 2.5 models which are currently available
+	models := []struct {
+		apiVersion string
+		modelName  string
+	}{
+		{"v1beta", "gemini-2.5-flash"},
+		{"v1beta", "gemini-2.5-pro"},
+		{"v1beta", "gemini-2.5-flash-preview-05-20"},
+		{"v1beta", "gemini-2.5-pro-preview-06-05"},
+		{"v1beta", "gemini-1.5-flash-latest"},
+		{"v1beta", "gemini-1.5-pro-latest"},
+	}
 	
 	payload := map[string]interface{}{
 		"contents": []map[string]interface{}{
@@ -311,39 +322,67 @@ func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int
 	}
 	
 	jsonData, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
 	
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to call Gemini API: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
+	var lastErr error
+	for _, model := range models {
+		url := fmt.Sprintf("https://generativelanguage.googleapis.com/%s/models/%s:generateContent?key=%s", 
+			model.apiVersion, model.modelName, s.geminiKey)
+		
+		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+		req.Header.Set("Content-Type", "application/json")
+		
+		resp, err := s.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to call Gemini API: %w", err)
+			continue
+		}
+		
+		if resp.StatusCode == http.StatusOK {
+			var result struct {
+				Candidates []struct {
+					Content struct {
+						Parts []struct {
+							Text string `json:"text"`
+						} `json:"parts"`
+					} `json:"content"`
+				} `json:"candidates"`
+			}
+			
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				resp.Body.Close()
+				lastErr = fmt.Errorf("failed to decode response: %w", err)
+				continue
+			}
+			resp.Body.Close()
+			
+			if len(result.Candidates) == 0 {
+				lastErr = fmt.Errorf("no candidates in response")
+				continue
+			}
+			
+			// Check if we have parts with text
+			if len(result.Candidates[0].Content.Parts) > 0 {
+				text := result.Candidates[0].Content.Parts[0].Text
+				if text != "" {
+					return strings.TrimSpace(text), nil
+				}
+			}
+			
+			// If no text, return error
+			if len(result.Candidates) > 0 {
+				lastErr = fmt.Errorf("no text content in response from model %s", model.modelName)
+			} else {
+				lastErr = fmt.Errorf("empty response from model %s", model.modelName)
+			}
+			continue
+		}
+		
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Gemini API error: %s", string(body))
+		resp.Body.Close()
+		lastErr = fmt.Errorf("Gemini API error (model: %s): %s", model.modelName, string(body))
 	}
 	
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-	
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-	
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no response from Gemini")
-	}
-	
-	return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
+	return "", fmt.Errorf("all Gemini models failed, last error: %w", lastErr)
 }
 
 func (s *AIService) callChatGPT(ctx context.Context, prompt string, maxTokens int) (string, error) {
