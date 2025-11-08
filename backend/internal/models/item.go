@@ -30,6 +30,7 @@ type Item struct {
 	EmbeddingID string    `json:"embedding_id"`
 	ImageURL    string    `json:"image_url"`    // For book covers, recipe images, or page previews
 	EmbedHTML   string    `json:"embed_html"`   // For URL embeds/previews
+	OcrText     string    `json:"ocr_text"`     // Extracted text from images/screenshots via OCR
 	CreatedAt   time.Time `json:"created_at"`
 }
 

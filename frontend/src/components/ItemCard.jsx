@@ -1,6 +1,58 @@
 import { Link } from 'react-router-dom';
+import BookCard from './BookCard';
+import RecipeCard from './RecipeCard';
+import ArticleCard from './ArticleCard';
+import VideoCard from './VideoCard';
+import ProductCard from './ProductCard';
+import TodoCard from './TodoCard';
 
 export default function ItemCard({ item }) {
+  // Check if it's a YouTube video (even if type is url/image)
+  const isYouTubeVideo = item.source_url && (
+    item.source_url.includes('youtube.com') || 
+    item.source_url.includes('youtu.be')
+  );
+
+  // Route to specialized card components based on type
+  switch (item.type) {
+    case 'book':
+      return <BookCard item={item} />;
+    case 'recipe':
+      return <RecipeCard item={item} />;
+    case 'blog':
+    case 'article':
+      return <ArticleCard item={item} />;
+    case 'video':
+      return <VideoCard item={item} />;
+    case 'url':
+      // If URL is a YouTube video, show as video
+      if (isYouTubeVideo) {
+        return <VideoCard item={item} />;
+      }
+      return <ArticleCard item={item} />;
+    case 'amazon':
+      return <ProductCard item={item} />;
+    case 'text':
+      // Check if it's a todo list
+      if (item.title?.toLowerCase().includes('todo') || 
+          item.title?.toLowerCase().includes('to-do') ||
+          item.content?.match(/^[-*•]\s|^\d+\.\s|^\[[\sx]\]/im)) {
+        return <TodoCard item={item} />;
+      }
+      return <DefaultItemCard item={item} />;
+    case 'image':
+      // If image is a screenshot of a YouTube video, show as video
+      if (isYouTubeVideo) {
+        return <VideoCard item={item} />;
+      }
+      return <DefaultItemCard item={item} />;
+    default:
+      // Default card for other types
+      return <DefaultItemCard item={item} />;
+  }
+}
+
+function DefaultItemCard({ item }) {
   const formatDate = (dateString) => {
     if (!dateString) return 'No date';
     try {
@@ -59,10 +111,17 @@ export default function ItemCard({ item }) {
           )}
         </div>
       )}
-        <div className="flex justify-between items-center text-xs text-gray-500">
-          <span>{formatDate(item.created_at)}</span>
-          <span className="capitalize">{item.type}</span>
-        </div>
+            <div className="flex justify-between items-center text-xs text-gray-500">
+              <span>{formatDate(item.created_at)}</span>
+              <div className="flex items-center gap-2">
+                {item.category && (
+                  <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                    {item.category}
+                  </span>
+                )}
+                <span className="capitalize">{item.type}</span>
+              </div>
+            </div>
       </div>
     </Link>
   );

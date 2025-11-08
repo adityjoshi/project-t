@@ -200,16 +200,48 @@ function extractBlogPost() {
   return blog;
 }
 
+// Detect todo list in selected text
+function detectTodoList(text) {
+  if (!text) return false;
+  // Check for common todo patterns
+  const todoPatterns = [
+    /^[-*•]\s/m,           // Bullet points
+    /^\d+\.\s/m,           // Numbered list
+    /^\[[\sx]\]/im,        // Checkboxes [ ] or [x]
+    /todo|to-do|task|item/i, // Contains todo keywords
+  ];
+  return todoPatterns.some(pattern => pattern.test(text));
+}
+
+// Extract YouTube video ID from URL
+function getYouTubeVideoID(url) {
+  const patterns = [
+    /[?&]v=([a-zA-Z0-9_-]+)/,
+    /youtu\.be\/([a-zA-Z0-9_-]+)/,
+    /embed\/([a-zA-Z0-9_-]+)/,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
 // Extract video information
-function extractVideoInfo() {
+async function extractVideoInfo() {
   const video = {
     title: '',
     channel: '',
     platform: '',
     thumbnail: '',
+    description: '',
   };
 
   const url = window.location.href;
+  const currentVideoID = getYouTubeVideoID(url);
 
   // YouTube
   if (url.includes('youtube.com') || url.includes('youtu.be')) {
@@ -218,6 +250,255 @@ function extractVideoInfo() {
     video.channel = document.querySelector('#channel-name a, .ytd-channel-name a')?.innerText || '';
     const thumb = document.querySelector('meta[property="og:image"]');
     if (thumb) video.thumbnail = thumb.getAttribute('content');
+    
+    // PRIORITY 1: Get from YouTube's internal data (most reliable for FULL description)
+    // IMPORTANT: Verify the video ID matches the current URL to avoid stale data
+    try {
+      // Try window.ytInitialPlayerResponse first (most reliable source)
+      // But verify it's for the current video
+      if (window.ytInitialPlayerResponse?.videoDetails) {
+        const dataVideoID = window.ytInitialPlayerResponse.videoDetails.videoId;
+        // Only use if video ID matches current URL
+        if (currentVideoID && dataVideoID === currentVideoID) {
+          const shortDesc = window.ytInitialPlayerResponse.videoDetails.shortDescription;
+          if (shortDesc && shortDesc.length > 0) {
+            video.description = shortDesc;
+          }
+        } else if (!currentVideoID) {
+          // If we can't extract video ID from URL, use it anyway (fallback)
+          const shortDesc = window.ytInitialPlayerResponse.videoDetails.shortDescription;
+          if (shortDesc && shortDesc.length > 0) {
+            video.description = shortDesc;
+          }
+        }
+      }
+      
+      // Try window.ytInitialData (verify it's for current video)
+      if (window.ytInitialData) {
+        // Try to verify video ID from ytInitialData
+        let isValidData = true;
+        if (currentVideoID) {
+          // Check if we can find the video ID in the data structure
+          const videoPrimaryInfo = window.ytInitialData?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.find(
+            c => c.videoPrimaryInfoRenderer
+          );
+          if (videoPrimaryInfo?.videoPrimaryInfoRenderer?.videoActions?.menuRenderer?.topLevelButtons) {
+            // Try to find video ID in the data
+            const dataStr = JSON.stringify(window.ytInitialData);
+            if (!dataStr.includes(currentVideoID)) {
+              isValidData = false;
+            }
+          }
+        }
+        
+        if (isValidData) {
+          const videoDetails = window.ytInitialData?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.find(
+            c => c.videoSecondaryInfoRenderer
+          )?.videoSecondaryInfoRenderer?.description?.runs;
+          
+          if (videoDetails && Array.isArray(videoDetails)) {
+            const fullDesc = videoDetails.map(run => run.text || '').join('');
+            if (fullDesc && fullDesc.length > (video.description?.length || 0)) {
+              video.description = fullDesc;
+            }
+          }
+        }
+      }
+      
+      // Try to find description in any script tag (for cases where window objects aren't available)
+      if (!video.description || video.description.length < 100) {
+        const scripts = document.querySelectorAll('script');
+        for (const script of scripts) {
+          const text = script.textContent || '';
+          if (text.includes('shortDescription') || text.includes('ytInitialPlayerResponse')) {
+            try {
+              // Try to extract from ytInitialPlayerResponse pattern (most reliable)
+              const playerResponseMatch = text.match(/ytInitialPlayerResponse\s*=\s*({.+?});/s);
+              if (playerResponseMatch) {
+                try {
+                  const playerData = JSON.parse(playerResponseMatch[1]);
+                  // Verify video ID matches
+                  const dataVideoID = playerData?.videoDetails?.videoId;
+                  if (currentVideoID && dataVideoID && dataVideoID !== currentVideoID) {
+                    // Skip this data - it's for a different video
+                    continue;
+                  }
+                  const shortDesc = playerData?.videoDetails?.shortDescription;
+                  if (shortDesc && shortDesc.length > (video.description?.length || 0)) {
+                    video.description = shortDesc;
+                    break; // Found it, no need to continue
+                  }
+                } catch (e) {
+                  // Try regex extraction as fallback
+                  const shortDescMatch = text.match(/"shortDescription"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                  if (shortDescMatch && shortDescMatch[1]) {
+                    const decoded = shortDescMatch[1]
+                      .replace(/\\n/g, '\n')
+                      .replace(/\\r/g, '\r')
+                      .replace(/\\t/g, '\t')
+                      .replace(/\\"/g, '"')
+                      .replace(/\\\\/g, '\\')
+                      .replace(/\\u([0-9a-fA-F]{4})/g, (match, code) => String.fromCharCode(parseInt(code, 16)));
+                    if (decoded.length > (video.description?.length || 0)) {
+                      video.description = decoded;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              // Try to extract from var ytInitialData = {...}
+              if (!video.description || video.description.length < 100) {
+                const ytDataMatch = text.match(/var\s+ytInitialData\s*=\s*({.+?});/s);
+                if (ytDataMatch) {
+                  try {
+                    const ytData = JSON.parse(ytDataMatch[1]);
+                    // Verify video ID matches current URL
+                    if (currentVideoID) {
+                      const dataStr = JSON.stringify(ytData);
+                      if (!dataStr.includes(currentVideoID)) {
+                        // Skip - data is for a different video
+                        continue;
+                      }
+                    }
+                    const videoDetails = ytData?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.find(
+                      c => c.videoSecondaryInfoRenderer
+                    )?.videoSecondaryInfoRenderer?.description?.runs;
+                    
+                    if (videoDetails && Array.isArray(videoDetails)) {
+                      const fullDesc = videoDetails.map(run => run.text || '').join('');
+                      if (fullDesc && fullDesc.length > (video.description?.length || 0)) {
+                        video.description = fullDesc;
+                      }
+                    }
+                  } catch (e) {
+                    // Continue
+                  }
+                }
+              }
+            } catch (e) {
+              // Continue to next script
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Could not extract from YouTube internal data:', e);
+    }
+    
+    // PRIORITY 2: Try DOM extraction (if internal data didn't work or was incomplete)
+    if (!video.description || video.description.length < 100) {
+      // First, try to expand the description if "Show more" button exists
+      const showMoreButtons = [
+        document.querySelector('ytd-expander #more'),
+        document.querySelector('ytd-video-secondary-info-renderer #more'),
+        document.querySelector('tp-yt-paper-button[id="more"]'),
+        document.querySelector('button[aria-label*="more"]'),
+        ...Array.from(document.querySelectorAll('button')).filter(btn => 
+          btn.textContent.toLowerCase().includes('show more') || 
+          btn.getAttribute('aria-label')?.toLowerCase().includes('more')
+        ),
+      ].filter(btn => btn !== null);
+      
+      for (const showMoreButton of showMoreButtons) {
+        if (showMoreButton && (showMoreButton.textContent.toLowerCase().includes('show more') || 
+            showMoreButton.getAttribute('aria-label')?.toLowerCase().includes('more'))) {
+          try {
+            showMoreButton.click();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            break;
+          } catch (e) {
+            console.log('Could not expand description:', e);
+          }
+        }
+      }
+      
+      // Try multiple selectors for YouTube description
+      const descriptionSelectors = [
+        'ytd-expander #content',
+        'ytd-video-secondary-info-renderer #description',
+        '#description-text',
+        '#description',
+        '.ytd-video-secondary-info-renderer #description',
+        'yt-formatted-string#content-text',
+        'yt-formatted-string.style-scope.ytd-video-secondary-info-renderer',
+        'ytd-video-secondary-info-renderer yt-formatted-string',
+      ];
+      
+      for (const selector of descriptionSelectors) {
+        const descEl = document.querySelector(selector);
+        if (descEl) {
+          let descText = '';
+          
+          if (descEl.tagName === 'YT-FORMATTED-STRING') {
+            descText = descEl.innerText || descEl.textContent || '';
+            const ariaLabel = descEl.getAttribute('aria-label');
+            if (ariaLabel && ariaLabel.length > descText.length) {
+              descText = ariaLabel;
+            }
+          } else {
+            descText = descEl.innerText || descEl.textContent || '';
+            const ytFormattedStrings = descEl.querySelectorAll('yt-formatted-string');
+            if (ytFormattedStrings.length > 0) {
+              const parts = Array.from(ytFormattedStrings).map(el => {
+                let text = el.innerText || el.textContent || '';
+                const ariaLabel = el.getAttribute('aria-label');
+                if (ariaLabel && ariaLabel.length > text.length) {
+                  text = ariaLabel;
+                }
+                return text;
+              }).filter(t => t.trim());
+              if (parts.length > 0) {
+                const combined = parts.join('\n');
+                if (combined.length > descText.length) {
+                  descText = combined;
+                }
+              }
+            }
+          }
+          
+          descText = descText
+            .replace(/\s*(Show more|Show less)\s*/gi, '')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          
+          if (descText && descText.length > (video.description?.length || 0)) {
+            video.description = descText;
+            break;
+          }
+        }
+      }
+    }
+    
+    // PRIORITY 3: Fallback to meta description
+    if (!video.description || video.description.length < 50) {
+      const metaDesc = document.querySelector('meta[name="description"]');
+      if (metaDesc) {
+        const metaText = metaDesc.getAttribute('content') || '';
+        if (metaText && metaText.length > (video.description?.length || 0)) {
+          video.description = metaText;
+        }
+      }
+    }
+    
+    // PRIORITY 4: Try structured data as last resort
+    if (!video.description || video.description.length < 100) {
+      const structuredData = document.querySelector('script[type="application/ld+json"]');
+      if (structuredData) {
+        try {
+          const data = JSON.parse(structuredData.textContent);
+          if (data.description && data.description.length > (video.description?.length || 0)) {
+            video.description = data.description;
+          } else if (data.videoDetails && data.videoDetails.shortDescription) {
+            if (data.videoDetails.shortDescription.length > (video.description?.length || 0)) {
+              video.description = data.videoDetails.shortDescription;
+            }
+          }
+        } catch (e) {
+          console.log('Could not parse structured data:', e);
+        }
+      }
+    }
   }
   // Vimeo
   else if (url.includes('vimeo.com')) {
@@ -225,6 +506,8 @@ function extractVideoInfo() {
     video.title = document.querySelector('h1')?.innerText || document.title;
     const thumb = document.querySelector('meta[property="og:image"]');
     if (thumb) video.thumbnail = thumb.getAttribute('content');
+    const descEl = document.querySelector('.description');
+    if (descEl) video.description = descEl.innerText || '';
   }
   // Generic video detection
   else {
@@ -299,59 +582,115 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const text = window.getSelection().toString().trim();
     selectedText = text;
     sendResponse({ selectedText: text });
+    return true;
   } else if (request.action === 'extractContent') {
-    const contentType = detectContentType();
-    let data = {
-      type: contentType,
-      url: window.location.href,
-      title: document.title,
-      content: '',
-      metadata: {},
-    };
+    // Use async IIFE to handle async extractVideoInfo
+    (async () => {
+      try {
+        // For YouTube videos, wait a bit to ensure page has loaded current video data
+        const url = window.location.href;
+        if ((url.includes('youtube.com') || url.includes('youtu.be')) && url.includes('/watch')) {
+          // Wait for page to be ready and video data to load
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Also wait for ytInitialPlayerResponse to be available/updated
+          let attempts = 0;
+          const maxAttempts = 10;
+          while (attempts < maxAttempts) {
+            const currentVideoID = getYouTubeVideoID(url);
+            if (window.ytInitialPlayerResponse?.videoDetails?.videoId) {
+              const dataVideoID = window.ytInitialPlayerResponse.videoDetails.videoId;
+              // If video IDs match, or we can't extract from URL, proceed
+              if (!currentVideoID || dataVideoID === currentVideoID) {
+                break;
+              }
+            }
+            await new Promise(resolve => setTimeout(resolve, 200));
+            attempts++;
+          }
+        }
+        
+        const contentType = detectContentType();
+        let data = {
+          type: contentType,
+          url: window.location.href,
+          title: document.title,
+          content: '',
+          metadata: {},
+        };
 
-    if (contentType === 'amazon') {
-      const product = extractAmazonProduct();
-      data.title = product.title || document.title;
-      data.content = `Price: ${product.price || 'N/A'}\nRating: ${product.rating || 'N/A'}\n\n${product.description || ''}`;
-      data.metadata = {
-        price: product.price,
-        rating: product.rating,
-        asin: product.asin,
-        image: product.image,
-      };
-    } else if (contentType === 'blog') {
-      const blog = extractBlogPost();
-      data.title = blog.title || document.title;
-      data.content = blog.content || '';
-      data.metadata = {
-        author: blog.author,
-        date: blog.date,
-        image: blog.image,
-      };
-    } else if (contentType === 'video') {
-      const video = extractVideoInfo();
-      data.title = video.title || document.title;
-      data.content = `Platform: ${video.platform}\n${video.channel ? `Channel: ${video.channel}\n` : ''}`;
-      data.metadata = {
-        platform: video.platform,
-        channel: video.channel,
-        thumbnail: video.thumbnail,
-      };
-    } else {
-      const page = extractPageContent();
-      data.title = page.title;
-      data.content = page.content || selectedText;
-    }
+        if (contentType === 'amazon') {
+          const product = extractAmazonProduct();
+          data.title = product.title || document.title;
+          data.content = `Price: ${product.price || 'N/A'}\nRating: ${product.rating || 'N/A'}\n\n${product.description || ''}`;
+          data.metadata = {
+            price: product.price,
+            rating: product.rating,
+            asin: product.asin,
+            image: product.image,
+          };
+        } else if (contentType === 'blog') {
+          const blog = extractBlogPost();
+          data.title = blog.title || document.title;
+          data.content = blog.content || '';
+          data.metadata = {
+            author: blog.author,
+            date: blog.date,
+            image: blog.image,
+          };
+        } else if (contentType === 'video') {
+          const video = await extractVideoInfo();
+          data.title = video.title || document.title;
+          // Include description in content if available
+          let contentParts = [`Platform: ${video.platform}`];
+          if (video.channel) {
+            contentParts.push(`Channel: ${video.channel}`);
+          }
+          if (video.description) {
+            contentParts.push(`\n\nDescription:\n${video.description}`);
+          }
+          data.content = contentParts.join('\n');
+          data.metadata = {
+            platform: video.platform,
+            channel: video.channel,
+            thumbnail: video.thumbnail,
+            description: video.description,
+          };
+        } else {
+          const page = extractPageContent();
+          data.title = page.title;
+          data.content = page.content || selectedText;
+        }
 
-    // Add selected text if available
-    if (selectedText) {
-      data.content = selectedText + '\n\n---\n\n' + data.content;
-    }
+        // Handle selected text - if it's a todo, format it properly
+        if (selectedText) {
+          if (detectTodoList(selectedText)) {
+            // If it's a todo list, use it as the main content
+            data.type = 'text';
+            data.title = data.title || 'Todo List';
+            data.content = selectedText;
+          } else {
+            // Otherwise, prepend to existing content
+            data.content = selectedText + '\n\n---\n\n' + data.content;
+          }
+        }
 
-    sendResponse(data);
+        sendResponse(data);
+      } catch (error) {
+        console.error('Error extracting content:', error);
+        sendResponse({ 
+          error: error.message,
+          type: 'url',
+          url: window.location.href,
+          title: document.title,
+          content: document.body.innerText.substring(0, 1000)
+        });
+      }
+    })();
+    return true; // Keep message channel open for async response
   }
   
-  return true; // Keep message channel open for async response
+  return false;
 });
 
 // Track text selection

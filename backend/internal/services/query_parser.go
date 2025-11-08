@@ -15,6 +15,12 @@ func ParseNaturalLanguageQuery(query string) *models.QueryFilters {
 
 	lowerQuery := strings.ToLower(query)
 
+	// Extract quote searches (e.g., "that quote about new beginnings")
+	quoteQuery := extractQuoteQuery(query, lowerQuery)
+	if quoteQuery != "" {
+		filters.SearchTerms = quoteQuery
+	}
+
 	// Extract date filters
 	filters.DateFrom, filters.DateTo = extractDateRange(lowerQuery)
 
@@ -24,17 +30,43 @@ func ParseNaturalLanguageQuery(query string) *models.QueryFilters {
 	// Extract price filters
 	filters.PriceMin, filters.PriceMax = extractPriceRange(lowerQuery)
 
-	// Extract author/source mentions
+	// Extract author mentions
 	filters.Author = extractAuthor(lowerQuery)
-	filters.Source = extractSource(lowerQuery)
+	
+	// Extract category filter (reusing Source field for category)
+	filters.Source = extractCategory(lowerQuery)
 
 	// Extract tags (common patterns)
 	filters.Tags = extractTags(lowerQuery)
 
-	// Clean search terms (remove filter phrases)
-	filters.SearchTerms = cleanSearchTerms(query, filters)
+	// Clean search terms (remove filter phrases) - only if not a quote query
+	if quoteQuery == "" {
+		filters.SearchTerms = cleanSearchTerms(query, filters)
+	}
 
 	return filters
+}
+
+// extractQuoteQuery extracts quote-related search terms
+func extractQuoteQuery(query, lowerQuery string) string {
+	// Patterns like "that quote about X", "quote about X", "find that quote"
+	quotePatterns := []string{
+		`that quote about (.+)`,
+		`quote about (.+)`,
+		`find that quote (.+)`,
+		`the quote (.+)`,
+		`quote (.+)`,
+	}
+	
+	for _, pattern := range quotePatterns {
+		re := regexp.MustCompile(`(?i)` + pattern)
+		matches := re.FindStringSubmatch(query)
+		if len(matches) > 1 {
+			return strings.TrimSpace(matches[1])
+		}
+	}
+	
+	return ""
 }
 
 func extractDateRange(query string) (*time.Time, *time.Time) {
@@ -209,14 +241,45 @@ func extractAuthor(query string) string {
 	return ""
 }
 
-func extractSource(query string) string {
-	// "from that paper", "in that article", "from the blog"
-	if strings.Contains(query, "paper") {
-		return "paper"
+func extractCategory(query string) string {
+	// Map common category mentions to actual category names
+	categoryMap := map[string]string{
+		"technology":     "Technology",
+		"tech":           "Technology",
+		"food":           "Food & Recipes",
+		"recipe":         "Food & Recipes",
+		"cooking":        "Food & Recipes",
+		"book":           "Books & Reading",
+		"books":          "Books & Reading",
+		"reading":        "Books & Reading",
+		"video":          "Videos & Entertainment",
+		"videos":         "Videos & Entertainment",
+		"entertainment":  "Videos & Entertainment",
+		"shopping":       "Shopping & Products",
+		"product":        "Shopping & Products",
+		"products":       "Shopping & Products",
+		"article":        "Articles & News",
+		"articles":       "Articles & News",
+		"news":           "Articles & News",
+		"note":           "Notes & Ideas",
+		"notes":          "Notes & Ideas",
+		"idea":           "Notes & Ideas",
+		"ideas":          "Notes & Ideas",
+		"design":         "Design & Inspiration",
+		"inspiration":    "Design & Inspiration",
+		"travel":         "Travel",
+		"health":         "Health & Fitness",
+		"fitness":        "Health & Fitness",
+		"education":      "Education & Learning",
+		"learning":       "Education & Learning",
 	}
-	if strings.Contains(query, "article") {
-		return "article"
+
+	for keyword, category := range categoryMap {
+		if strings.Contains(query, keyword) {
+			return category
+		}
 	}
+
 	return ""
 }
 

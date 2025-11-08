@@ -253,11 +253,11 @@ func (s *AIService) GenerateSemanticSummary(ctx context.Context, title, content 
 	
 	prompt := fmt.Sprintf(
 		`Create a concise semantic summary (2-3 sentences) of this content that captures key concepts, topics, and ideas. This summary will be used for search, so include important keywords and concepts:
-
-Title: %s
-Content: %s
-
-Summary:`,
+    
+    Title: %s
+    Content: %s
+    
+    Summary:`,
 		title, truncated,
 	)
 	
@@ -267,7 +267,33 @@ Summary:`,
 	return s.callChatGPT(ctx, prompt, 200)
 }
 
+// SummarizeYouTubeVideo generates a summary for a YouTube video using Gemini
+func (s *AIService) SummarizeYouTubeVideo(ctx context.Context, videoURL, title, description string) (string, error) {
+	// Truncate description if too long (keep it reasonable for the API)
+	truncatedDesc := description
+	if len(description) > 5000 {
+		truncatedDesc = description[:5000] + "..."
+	}
+	
+	prompt := fmt.Sprintf(
+		`You are summarizing a YouTube video. Create a concise, informative summary (3-4 sentences) that captures the main topics, key points, and important information discussed in the video. Focus on what the video is actually about, not just promotional content or links. Make it useful for someone who wants to understand the video's content without watching it.
+
+Video Title: %s
+Video Description: %s
+Video URL: %s
+
+Based on the title and description above, provide a clear summary of what this video covers:`,
+		title, truncatedDesc, videoURL,
+	)
+	
+	if s.provider == "gemini" {
+		return s.callGemini(ctx, prompt, 300)
+	}
+	return s.callChatGPT(ctx, prompt, 300)
+}
+
 func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	// Use gemini-1.5-flash model (faster and more available than gemini-pro)
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%s", s.geminiKey)
 	
 	payload := map[string]interface{}{

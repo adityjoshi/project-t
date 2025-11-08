@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"synapse/internal/db"
 	"synapse/internal/models"
 	"synapse/internal/repository"
@@ -26,14 +27,18 @@ func NewSearchService(aiService *AIService, itemRepo *repository.ItemRepository)
 }
 
 // Search performs hybrid search: semantic (ChromaDB) + text (PostgreSQL) with natural language parsing
+// Enhanced to find specific passages and quotes
 func (s *SearchService) Search(ctx context.Context, query string, limit int) ([]models.SearchResult, error) {
 	// Parse natural language query
 	filters := ParseNaturalLanguageQuery(query)
 
+	// For quote/passage searches, enhance the query with context
+	enhancedQuery := s.enhanceQueryForPassageSearch(ctx, filters.SearchTerms, query)
+
 	// Try semantic search first (if ChromaDB is available)
-	semanticResults, semanticErr := s.semanticSearch(ctx, filters.SearchTerms, limit*2)
+	semanticResults, semanticErr := s.semanticSearch(ctx, enhancedQuery, limit*2)
 	
-	// Always do text search as fallback/combination
+	// Always do text search as fallback/combination (includes OCR text)
 	textResults, textErr := s.itemRepo.SearchItems(ctx, filters, limit*2)
 	
 	if semanticErr != nil && textErr != nil {
@@ -44,10 +49,64 @@ func (s *SearchService) Search(ctx context.Context, query string, limit int) ([]
 	// Combine results
 	results := s.combineResults(semanticResults, textResults, limit)
 
+	// For quote searches, boost items that contain the exact phrase
+	results = s.boostExactMatches(results, filters.SearchTerms)
+
 	// Apply post-filters (price, etc. that aren't in SQL)
 	results = s.applyPostFilters(results, filters)
 
 	return results, nil
+}
+
+// enhanceQueryForPassageSearch enhances queries to better find specific passages
+func (s *SearchService) enhanceQueryForPassageSearch(ctx context.Context, searchTerms, originalQuery string) string {
+	// If the query mentions "quote", "said", "wrote", etc., keep the original context
+	lowerQuery := strings.ToLower(originalQuery)
+	if strings.Contains(lowerQuery, "quote") || 
+	   strings.Contains(lowerQuery, "said") || 
+	   strings.Contains(lowerQuery, "wrote") ||
+	   strings.Contains(lowerQuery, "mentioned") {
+		// Keep more context for passage searches
+		return originalQuery
+	}
+	return searchTerms
+}
+
+// boostExactMatches boosts items that contain exact phrase matches
+func (s *SearchService) boostExactMatches(results []models.SearchResult, searchTerms string) []models.SearchResult {
+	lowerSearch := strings.ToLower(searchTerms)
+	
+	for i := range results {
+		item := results[i].Item
+		searchableText := strings.ToLower(item.Title + " " + item.Content + " " + item.Summary + " " + item.OcrText)
+		
+		// Boost if exact phrase found
+		if strings.Contains(searchableText, lowerSearch) {
+			results[i].SimilarityScore += 0.2
+			if results[i].SimilarityScore > 1.0 {
+				results[i].SimilarityScore = 1.0
+			}
+		}
+		
+		// Extra boost if found in title
+		if strings.Contains(strings.ToLower(item.Title), lowerSearch) {
+			results[i].SimilarityScore += 0.1
+			if results[i].SimilarityScore > 1.0 {
+				results[i].SimilarityScore = 1.0
+			}
+		}
+	}
+	
+	// Re-sort by score
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[i].SimilarityScore < results[j].SimilarityScore {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+	
+	return results
 }
 
 func (s *SearchService) semanticSearch(ctx context.Context, query string, limit int) ([]models.SearchResult, error) {

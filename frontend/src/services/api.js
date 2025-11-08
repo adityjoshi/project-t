@@ -17,6 +17,7 @@ export const itemsAPI = {
   getById: (id) => api.get(`/items/${id}`),
   delete: (id) => api.delete(`/items/${id}`),
   getRelated: (id) => api.get(`/items/${id}/related`),
+  refreshSummary: (id) => api.post(`/items/${id}/refresh-summary`),
 };
 
 export const searchAPI = {

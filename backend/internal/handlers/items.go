@@ -114,3 +114,52 @@ func (h *ItemHandler) GetRelatedItems(c *gin.Context) {
 	c.JSON(http.StatusOK, related)
 }
 
+func (h *ItemHandler) RefreshImage(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	if err := h.itemService.RefreshImageForItem(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Return updated item
+	item, err := h.itemService.GetItem(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, item)
+}
+
+func (h *ItemHandler) RefreshSummary(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	if err := h.itemService.RefreshSummaryForItem(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Return current item (summary will be updated asynchronously)
+	item, err := h.itemService.GetItem(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Summary regeneration started",
+		"item":    item,
+	})
+}
+

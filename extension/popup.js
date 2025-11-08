@@ -14,8 +14,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Get current tab info
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   
-  // Set default title
-  titleInput.value = tab.title || '';
+  // Check for quick save data from context menu
+  const quickSave = await chrome.storage.local.get('quickSave');
+  if (quickSave.quickSave) {
+    titleInput.value = quickSave.quickSave.title || tab.title || '';
+    contentInput.value = quickSave.quickSave.content || '';
+    // Clear the quick save data and badge
+    chrome.storage.local.remove('quickSave');
+    chrome.action.setBadgeText({ text: '', tabId: tab.id });
+    // Auto-fill if content exists
+    if (quickSave.quickSave.content) {
+      showStatus('Content ready to save!', 'success');
+    }
+  } else {
+    // Set default title
+    titleInput.value = tab.title || '';
+  }
 
   // Detect and show content type
   chrome.tabs.sendMessage(tab.id, { action: 'extractContent' }, (response) => {
@@ -39,26 +53,45 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Fill from page button
   fillPageBtn.addEventListener('click', async () => {
     try {
+      fillPageBtn.disabled = true;
+      fillPageBtn.textContent = 'Extracting...';
+      showStatus('Extracting content...', 'info');
+      
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
-      chrome.tabs.sendMessage(tab.id, { action: 'extractContent' }, (response) => {
-        if (response) {
-          if (response.title) titleInput.value = response.title;
-          if (response.content) {
-            contentInput.value = response.content;
+      // Use promise-based message sending
+      const response = await new Promise((resolve, reject) => {
+        chrome.tabs.sendMessage(tab.id, { action: 'extractContent' }, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(response);
           }
-          
-          // Show content type
-          if (response.type) {
-            contentTypeDiv.textContent = `Type: ${response.type.charAt(0).toUpperCase() + response.type.slice(1)}`;
-            contentTypeDiv.style.display = 'block';
-          }
-          
-          showStatus('Page content extracted!', 'success');
-        }
+        });
       });
+      
+      if (response) {
+        if (response.title) titleInput.value = response.title;
+        if (response.content) {
+          contentInput.value = response.content;
+        }
+        
+        // Show content type
+        if (response.type) {
+          contentTypeDiv.textContent = `Type: ${response.type.charAt(0).toUpperCase() + response.type.slice(1)}`;
+          contentTypeDiv.style.display = 'block';
+        }
+        
+        showStatus('Page content extracted!', 'success');
+      } else {
+        showStatus('No content found on this page', 'error');
+      }
     } catch (error) {
-      showStatus('Failed to extract content', 'error');
+      console.error('Error extracting content:', error);
+      showStatus(`Failed to extract content: ${error.message}`, 'error');
+    } finally {
+      fillPageBtn.disabled = false;
+      fillPageBtn.textContent = '📄 Fill from Page';
     }
   });
 
@@ -150,8 +183,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         type: extractResponse?.type || 'url',
       };
 
-      // Add metadata if available
+      // Add metadata if available (important for video descriptions, product info, etc.)
       if (extractResponse?.metadata) {
+        payload.metadata = extractResponse.metadata;
         // Include image from metadata if available
         if (extractResponse.metadata.image) {
           payload.image_url = extractResponse.metadata.image;

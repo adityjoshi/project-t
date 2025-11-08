@@ -21,8 +21,8 @@ func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 
 func (r *ItemRepository) Create(ctx context.Context, item *models.Item) error {
 	query := `
-		INSERT INTO items (id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO items (id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, ocr_text, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 	
 	tagsArray := pgtype.Array[string]{
@@ -32,25 +32,25 @@ func (r *ItemRepository) Create(ctx context.Context, item *models.Item) error {
 	
 	_, err := r.pool.Exec(ctx, query,
 		item.ID, item.Title, item.Content, item.Summary, item.SourceURL,
-		item.Type, item.Category, tagsArray, item.EmbeddingID, item.ImageURL, item.EmbedHTML, item.CreatedAt,
+		item.Type, item.Category, tagsArray, item.EmbeddingID, item.ImageURL, item.EmbedHTML, item.OcrText, item.CreatedAt,
 	)
 	return err
 }
 
 func (r *ItemRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Item, error) {
 	query := `
-		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, created_at
+		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, ocr_text, created_at
 		FROM items
 		WHERE id = $1
 	`
 	
 	var item models.Item
 	var tagsArray pgtype.Array[string]
-	var imageURL, embedHTML, category sql.NullString
+	var imageURL, embedHTML, category, ocrText sql.NullString
 	
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&item.ID, &item.Title, &item.Content, &item.Summary, &item.SourceURL,
-		&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &item.CreatedAt,
+		&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &ocrText, &item.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -66,12 +66,15 @@ func (r *ItemRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Ite
 	if embedHTML.Valid {
 		item.EmbedHTML = embedHTML.String
 	}
+	if ocrText.Valid {
+		item.OcrText = ocrText.String
+	}
 	return &item, nil
 }
 
 func (r *ItemRepository) GetAll(ctx context.Context) ([]models.Item, error) {
 	query := `
-		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, created_at
+		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, ocr_text, created_at
 		FROM items
 		ORDER BY created_at DESC
 	`
@@ -86,11 +89,11 @@ func (r *ItemRepository) GetAll(ctx context.Context) ([]models.Item, error) {
 	for rows.Next() {
 		var item models.Item
 		var tagsArray pgtype.Array[string]
-		var imageURL, embedHTML, category sql.NullString
+		var imageURL, embedHTML, category, ocrText sql.NullString
 		
 		err := rows.Scan(
 			&item.ID, &item.Title, &item.Content, &item.Summary, &item.SourceURL,
-			&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &item.CreatedAt,
+			&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &ocrText, &item.CreatedAt,
 		)
 		if err != nil {
 			return []models.Item{}, err
@@ -106,6 +109,9 @@ func (r *ItemRepository) GetAll(ctx context.Context) ([]models.Item, error) {
 		if embedHTML.Valid {
 			item.EmbedHTML = embedHTML.String
 		}
+		if ocrText.Valid {
+			item.OcrText = ocrText.String
+		}
 		items = append(items, item)
 	}
 	
@@ -118,7 +124,7 @@ func (r *ItemRepository) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]model
 	}
 	
 	query := `
-		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, created_at
+		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, ocr_text, created_at
 		FROM items
 		WHERE id = ANY($1)
 	`
@@ -133,11 +139,11 @@ func (r *ItemRepository) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]model
 	for rows.Next() {
 		var item models.Item
 		var tagsArray pgtype.Array[string]
-		var imageURL, embedHTML, category sql.NullString
+		var imageURL, embedHTML, category, ocrText sql.NullString
 		
 		err := rows.Scan(
 			&item.ID, &item.Title, &item.Content, &item.Summary, &item.SourceURL,
-			&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &item.CreatedAt,
+			&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &ocrText, &item.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -153,6 +159,9 @@ func (r *ItemRepository) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]model
 		if embedHTML.Valid {
 			item.EmbedHTML = embedHTML.String
 		}
+		if ocrText.Valid {
+			item.OcrText = ocrText.String
+		}
 		items = append(items, item)
 	}
 	
@@ -165,23 +174,45 @@ func (r *ItemRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-// SearchItems performs text search with filters
+// UpdateSummary updates the summary field of an item (for async summarization)
+func (r *ItemRepository) UpdateSummary(ctx context.Context, id uuid.UUID, summary string) error {
+	query := `UPDATE items SET summary = $1 WHERE id = $2`
+	_, err := r.pool.Exec(ctx, query, summary, id)
+	return err
+}
+
+// UpdateImageURL updates the image_url field of an item
+func (r *ItemRepository) UpdateImageURL(ctx context.Context, id uuid.UUID, imageURL string) error {
+	query := `UPDATE items SET image_url = $1 WHERE id = $2`
+	_, err := r.pool.Exec(ctx, query, imageURL, id)
+	return err
+}
+
+// UpdateOCRText updates the ocr_text field of an item
+func (r *ItemRepository) UpdateOCRText(ctx context.Context, id uuid.UUID, ocrText string) error {
+	query := `UPDATE items SET ocr_text = $1 WHERE id = $2`
+	_, err := r.pool.Exec(ctx, query, ocrText, id)
+	return err
+}
+
+// SearchItems performs text search with filters (includes OCR text)
 func (r *ItemRepository) SearchItems(ctx context.Context, filters *models.QueryFilters, limit int) ([]models.Item, error) {
 	query := `
-		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, created_at
+		SELECT id, title, content, summary, source_url, type, category, tags, embedding_id, image_url, embed_html, ocr_text, created_at
 		FROM items
 		WHERE 1=1
 	`
 	args := []interface{}{}
 	argIndex := 1
 
-	// Text search
+	// Text search (includes OCR text for images/screenshots)
 	if filters.SearchTerms != "" {
 		query += fmt.Sprintf(` AND (
 			title ILIKE $%d OR 
 			content ILIKE $%d OR 
-			summary ILIKE $%d
-		)`, argIndex, argIndex, argIndex)
+			summary ILIKE $%d OR
+			ocr_text ILIKE $%d
+		)`, argIndex, argIndex, argIndex, argIndex)
 		searchPattern := "%" + filters.SearchTerms + "%"
 		args = append(args, searchPattern)
 		argIndex++
@@ -229,6 +260,13 @@ func (r *ItemRepository) SearchItems(ctx context.Context, filters *models.QueryF
 		argIndex++
 	}
 
+	// Category filter (using Source field from QueryFilters for category)
+	if filters.Source != "" {
+		query += fmt.Sprintf(` AND category = $%d`, argIndex)
+		args = append(args, filters.Source)
+		argIndex++
+	}
+
 	query += ` ORDER BY created_at DESC LIMIT $` + fmt.Sprintf("%d", argIndex)
 	args = append(args, limit)
 
@@ -242,26 +280,31 @@ func (r *ItemRepository) SearchItems(ctx context.Context, filters *models.QueryF
 	for rows.Next() {
 		var item models.Item
 		var tagsArray pgtype.Array[string]
-		var imageURL, embedHTML sql.NullString
+		var imageURL, embedHTML, category, ocrText sql.NullString
 
 		err := rows.Scan(
 			&item.ID, &item.Title, &item.Content, &item.Summary, &item.SourceURL,
-			&item.Type, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &item.CreatedAt,
+			&item.Type, &category, &tagsArray, &item.EmbeddingID, &imageURL, &embedHTML, &ocrText, &item.CreatedAt,
 		)
 		if err != nil {
 			return []models.Item{}, err
 		}
 
 		item.Tags = tagsArray.Elements
+		if category.Valid {
+			item.Category = category.String
+		}
 		if imageURL.Valid {
 			item.ImageURL = imageURL.String
 		}
 		if embedHTML.Valid {
 			item.EmbedHTML = embedHTML.String
 		}
+		if ocrText.Valid {
+			item.OcrText = ocrText.String
+		}
 		items = append(items, item)
 	}
 
 	return items, nil
 }
-

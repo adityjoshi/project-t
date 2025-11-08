@@ -83,6 +83,8 @@ func main() {
 		api.GET("/items/:id", itemHandler.GetItem)
 		api.DELETE("/items/:id", itemHandler.DeleteItem)
 		api.GET("/items/:id/related", itemHandler.GetRelatedItems)
+		api.POST("/items/:id/refresh-image", itemHandler.RefreshImage)
+		api.POST("/items/:id/refresh-summary", itemHandler.RefreshSummary)
 
 		// Search
 		api.GET("/search", searchHandler.Search)

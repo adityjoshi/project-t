@@ -61,6 +61,42 @@ func CreateSchema() error {
 	`
 
 	_, err := Pool.Exec(context.Background(), schema)
+	if err != nil {
+		return err
+	}
+
+	// Add category column if it doesn't exist (migration for existing databases)
+	migration1 := `
+		DO $$ 
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.columns 
+				WHERE table_name = 'items' AND column_name = 'category'
+			) THEN
+				ALTER TABLE items ADD COLUMN category TEXT;
+			END IF;
+		END $$;
+	`
+
+	_, err = Pool.Exec(context.Background(), migration1)
+	if err != nil {
+		return err
+	}
+
+	// Add ocr_text column if it doesn't exist (migration for existing databases)
+	migration2 := `
+		DO $$ 
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.columns 
+				WHERE table_name = 'items' AND column_name = 'ocr_text'
+			) THEN
+				ALTER TABLE items ADD COLUMN ocr_text TEXT;
+			END IF;
+		END $$;
+	`
+
+	_, err = Pool.Exec(context.Background(), migration2)
 	return err
 }
 
