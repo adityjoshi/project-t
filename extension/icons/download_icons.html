@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+// Create icons using canvas and download
+function createIcon(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  
+  // Fill with indigo color
+  ctx.fillStyle = '#4f46e5';
+  ctx.fillRect(0, 0, size, size);
+  
+  // Add a simple brain emoji or S letter
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${size * 0.6}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🧠', size/2, size/2);
+  
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `icon${size}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// Create all icons
+createIcon(16);
+setTimeout(() => createIcon(48), 100);
+setTimeout(() => createIcon(128), 200);
+</script>
+</head>
+<body>
+<h1>Icon Generator</h1>
+<p>Open this file in a browser to generate icons</p>
+</body>
+</html>

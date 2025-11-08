@@ -1,0 +1,18 @@
+# Git
+.git
+.gitignore
+
+# Environment
+.env
+.env.local
+
+# Test files
+*_test.go
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+
