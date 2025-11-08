@@ -267,7 +267,7 @@ func (s *AIService) GenerateSemanticSummary(ctx context.Context, title, content 
 	return s.callChatGPT(ctx, prompt, 200)
 }
 
-// SummarizeYouTubeVideo generates a summary for a YouTube video using Gemini
+// SummarizeYouTubeVideo generates a short summary for a YouTube video using Gemini
 func (s *AIService) SummarizeYouTubeVideo(ctx context.Context, videoURL, title, description string) (string, error) {
 	// Truncate description if too long (keep it reasonable for the API)
 	truncatedDesc := description
@@ -276,20 +276,19 @@ func (s *AIService) SummarizeYouTubeVideo(ctx context.Context, videoURL, title, 
 	}
 	
 	prompt := fmt.Sprintf(
-		`You are summarizing a YouTube video. Create a concise, informative summary (3-4 sentences) that captures the main topics, key points, and important information discussed in the video. Focus on what the video is actually about, not just promotional content or links. Make it useful for someone who wants to understand the video's content without watching it.
+		`Create a SHORT, concise summary (2-3 sentences maximum) of this YouTube video. Focus only on the main topic and key points. Be brief and informative.
 
 Video Title: %s
 Video Description: %s
-Video URL: %s
 
-Based on the title and description above, provide a clear summary of what this video covers:`,
-		title, truncatedDesc, videoURL,
+Provide a brief summary:`,
+		title, truncatedDesc,
 	)
 	
 	if s.provider == "gemini" {
-		return s.callGemini(ctx, prompt, 300)
+		return s.callGemini(ctx, prompt, 150) // Reduced tokens for shorter summary
 	}
-	return s.callChatGPT(ctx, prompt, 300)
+	return s.callChatGPT(ctx, prompt, 150)
 }
 
 func (s *AIService) callGemini(ctx context.Context, prompt string, maxTokens int) (string, error) {
